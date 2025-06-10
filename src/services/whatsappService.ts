@@ -35,7 +35,7 @@ export const openWhatsAppWithMessage = (phone: string, message: string) => {
 export const notifyAppointmentCreated = async (data: WhatsAppMessageData) => {
  const adminMessage = `🔔 *NUEVA CITA REGISTRADA* 🔔
 
-✂️ *D' Gastón Stylo Barbería*
+✂️ *D' Gastón Stylo Barber Shop* ✂️
 
 👤 *Cliente:* ${data.clientName}
 📱 *Teléfono:* ${data.clientPhone}
@@ -59,7 +59,7 @@ export const notifyAppointmentCreated = async (data: WhatsAppMessageData) => {
 export const notifyAppointmentCancelled = async (data: WhatsAppMessageData) => {
  const adminMessage = `❌ *CITA CANCELADA* ❌
 
-✂️ *D' Gastón Stylo Barbería*
+✂️ *D' Gastón Stylo Barber Shop* ✂️
 
 👤 *Cliente:* ${data.clientName}
 📱 *Teléfono:* ${data.clientPhone}
