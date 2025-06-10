@@ -48,7 +48,7 @@ export const openWhatsAppWithMessage = (phone: string, message: string) => {
 export const notifyAppointmentCreated = (data: WhatsAppMessageData) => {
   const adminMessage = `🔔 *NUEVA CITA REGISTRADA* 🔔
 
-✂️ *D' Gastón Stylo Barbería*
+✂️ *D' Gastón Stylo Barber Shop* ✂️
 
 👤 *Cliente:* ${data.clientName}
 📱 *Teléfono:* ${data.clientPhone}
@@ -72,7 +72,7 @@ export const notifyAppointmentCreated = (data: WhatsAppMessageData) => {
 export const notifyAppointmentCancelled = (data: WhatsAppMessageData) => {
   const adminMessage = `❌ *CITA CANCELADA* ❌
 
-✂️ *D' Gastón Stylo Barbería*
+✂️ *D' Gastón Stylo Barberí*
 
 👤 *Cliente:* ${data.clientName}
 📱 *Teléfono:* ${data.clientPhone}
@@ -97,17 +97,18 @@ export const notifyAppointmentCancelled = (data: WhatsAppMessageData) => {
 export const notifyClientAppointmentConfirmed = (data: WhatsAppMessageData) => {
   const clientMessage = `✅ *CITA CONFIRMADA* ✅
 
-✂️ *D' Gastón Stylo Barbería*
+✂️ *D' Gastón Stylo Barber Shop* ✂️
 
-¡Hola ${data.clientName}! Tu cita ha sido confirmada:
+¡Nueva cita confirmada en el sistema!
 
+👤 *Cliente:* ${data.clientName}
+📱 *Teléfono:* ${data.clientPhone}
 📅 *Fecha:* ${data.date}
 🕒 *Hora:* ${data.time}
-💼 *Servicio:* ${data.service}
 
-📍 *Dirección:* [Tu dirección aquí]
+📍 *Dirección:* Juan XXIII, Higuey
 
-⏰ Te recomendamos llegar 5 minutos antes.
+⏰ Te recomendamos llegar 10  minutos antes.
 
 ¡Nos vemos pronto! 💈`;
 
@@ -124,16 +125,14 @@ export const notifyClientAppointmentConfirmed = (data: WhatsAppMessageData) => {
 export const notifyClientAppointmentCancelled = (data: WhatsAppMessageData) => {
   const clientMessage = `❌ *CITA CANCELADA* ❌
 
-✂️ *D' Gastón Stylo Barbería*
+✂️ *D' Gastón Stylo Barber Shop* ✂️
 
-Hola ${data.clientName}, 
+Esta cita ha sido cancelada.
 
-Tu cita programada para:
+H👤 *Cliente:* ${data.clientName}
+📱 *Teléfono:* ${data.clientPhone}
 📅 *Fecha:* ${data.date}
 🕒 *Hora:* ${data.time}
-💼 *Servicio:* ${data.service}
-
-Ha sido cancelada.
 
 💬 Si deseas reagendar, no dudes en contactarnos.
 
