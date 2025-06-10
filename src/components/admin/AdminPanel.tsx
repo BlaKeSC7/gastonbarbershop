@@ -1,26 +1,17 @@
 import React, { useState } from 'react';
-import { Calendar as CalendarIcon, Clock, XCircle } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, XCircle, Settings as SettingsIcon } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useAppointments } from '../../context/AppointmentContext';
 import HolidayForm from './HolidayForm';
 import BlockedTimeForm from './BlockedTimeForm';
+import AdminSettings from './AdminSettings';
 import AppointmentList from '../AppointmentList';
 import { Holiday, BlockedTime } from '../../types';
 
 const AdminPanel: React.FC = () => {
-  const [tab, setTab] = useState<'appointments' | 'holidays' | 'blockedTimes'>('appointments');
-  const { holidays, blockedTimes, removeHoliday, removeBlockedTime, createBlockedTime } = useAppointments();
-
-  const handleBlockTime = async (selectedDate: Date | null, selectedTime: string | null, reason: string) => {
-    if (!selectedDate || !selectedTime) return;
-
-    await createBlockedTime({
-      date: selectedDate,
-      time: selectedTime,
-      reason: reason,
-    });
-  };
+  const [tab, setTab] = useState<'appointments' | 'holidays' | 'blockedTimes' | 'settings'>('appointments');
+  const { holidays, blockedTimes, removeHoliday, removeBlockedTime } = useAppointments();
 
   return (
     <div className="mt-6 bg-white rounded-lg shadow-lg overflow-hidden">
@@ -58,6 +49,16 @@ const AdminPanel: React.FC = () => {
           >
             Horas Bloqueadas
           </button>
+          <button
+            className={`py-2 px-4 font-medium text-sm ${
+              tab === 'settings'
+                ? 'text-red-600 border-b-2 border-red-600'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+            onClick={() => setTab('settings')}
+          >
+            Configuración
+          </button>
         </div>
         
         {tab === 'appointments' && (
@@ -88,7 +89,7 @@ const AdminPanel: React.FC = () => {
 
         {tab === 'blockedTimes' && (
           <div>
-            <BlockedTimeForm onBlockTime={handleBlockTime} />
+            <BlockedTimeForm />
             <div className="mt-8">
               <h3 className="text-lg font-medium mb-4">Horarios Bloqueados</h3>
               {blockedTimes.length === 0 ? (
@@ -106,6 +107,10 @@ const AdminPanel: React.FC = () => {
               )}
             </div>
           </div>
+        )}
+
+        {tab === 'settings' && (
+          <AdminSettings />
         )}
       </div>
     </div>
@@ -154,16 +159,25 @@ const BlockedTimeCard: React.FC<BlockedTimeCardProps> = ({ blockedTime, onDelete
         <div className="flex items-start">
           <Clock className="h-5 w-5 text-orange-500 mt-1 mr-2" />
           <div>
-            <h4 className="font-medium">{blockedTime.reason}</h4>
+            <h4 className="font-medium">{blockedTime.reason || 'Horario bloqueado'}</h4>
             <p className="text-gray-600 text-sm">
               {format(blockedTime.date, "EEEE, d 'de' MMMM 'de' yyyy", { locale: es })}
             </p>
             <div className="mt-1 flex flex-wrap gap-1">
-              <span
-                className="inline-block bg-gray-200 text-gray-700 text-xs px-2 py-1 rounded"
-              >
-                {blockedTime.time}
-              </span>
+              {Array.isArray(blockedTime.timeSlots) ? (
+                blockedTime.timeSlots.map((time, index) => (
+                  <span
+                    key={index}
+                    className="inline-block bg-gray-200 text-gray-700 text-xs px-2 py-1 rounded"
+                  >
+                    {time}
+                  </span>
+                ))
+              ) : (
+                <span className="inline-block bg-gray-200 text-gray-700 text-xs px-2 py-1 rounded">
+                  {blockedTime.time || blockedTime.timeSlots}
+                </span>
+              )}
             </div>
           </div>
         </div>
