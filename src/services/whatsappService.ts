@@ -19,23 +19,19 @@ export const openWhatsAppWithMessage = (phone: string, message: string) => {
   // Detectar el dispositivo
   const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
   const isAndroid = /Android/i.test(navigator.userAgent);
+  const isMobile = isIOS || isAndroid;
   
-  if (isIOS || isAndroid) {
-    // Para móviles - crear enlace invisible y hacer click inmediato
-    const a = document.createElement('a');
-    a.href = `whatsapp://send?phone=${cleanPhone}&text=${encodedMessage}`;
-    a.style.display = 'none';
-    a.rel = 'noopener';
-    
-    document.body.appendChild(a);
-    
-    // Click inmediato para mantener el contexto de usuario
-    a.click();
-    document.body.removeChild(a);
-    
+  // URL de WhatsApp
+  const whatsappURL = isMobile 
+    ? `whatsapp://send?phone=${cleanPhone}&text=${encodedMessage}`
+    : `https://web.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMessage}`;
+  
+  if (isMobile) {
+    // Para móviles - usar window.location.href que mantiene mejor el contexto
+    window.location.href = whatsappURL;
   } else {
     // Para navegadores de escritorio
-    window.open(`https://web.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMessage}`, '_blank');
+    window.open(whatsappURL, '_blank', 'noopener,noreferrer');
   }
 };
 
