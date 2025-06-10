@@ -8,8 +8,18 @@ interface WhatsAppMessageData {
 
 const ADMIN_PHONE = '+18092033894';
 
+// Variable para evitar ejecuciones múltiples
+let isExecuting = false;
+
 // Función para abrir WhatsApp directamente sin confirmación
 export const openWhatsAppWithMessage = (phone: string, message: string) => {
+  // Prevenir ejecuciones múltiples
+  if (isExecuting) return;
+  isExecuting = true;
+  
+  // Reset después de un tiempo
+  setTimeout(() => { isExecuting = false; }, 2000);
+  
   // Limpiar el número de teléfono
   const cleanPhone = phone.replace(/\D/g, '');
   
