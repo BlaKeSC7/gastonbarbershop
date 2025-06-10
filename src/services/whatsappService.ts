@@ -8,7 +8,7 @@ interface WhatsAppMessageData {
 
 const ADMIN_PHONE = '+18092033894';
 
-// Función para abrir WhatsApp con mensaje pre-escrito (optimizada para iOS)
+// Función para abrir WhatsApp directamente sin confirmación
 export const openWhatsAppWithMessage = (phone: string, message: string) => {
   // Limpiar el número de teléfono
   const cleanPhone = phone.replace(/\D/g, '');
@@ -20,12 +20,25 @@ export const openWhatsAppWithMessage = (phone: string, message: string) => {
   const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
   const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   
-  if (isIOS) {
-    // Para iOS - usar wa.me directamente (más confiable)
-    window.location.href = `https://wa.me/${cleanPhone}?text=${encodedMessage}`;
-  } else if (isMobile) {
-    // Para Android móvil
-    window.open(`https://wa.me/${cleanPhone}?text=${encodedMessage}`, '_blank');
+  if (isMobile) {
+    // Para móviles (iOS y Android) - crear enlace y hacer click automático
+    const link = document.createElement('a');
+    link.href = `https://wa.me/${cleanPhone}?text=${encodedMessage}`;
+    link.target = '_self'; // Esto es clave para iOS
+    link.style.display = 'none';
+    
+    // Agregar al DOM temporalmente
+    document.body.appendChild(link);
+    
+    // Simular click inmediato
+    link.click();
+    
+    // Limpiar
+    setTimeout(() => {
+      if (document.body.contains(link)) {
+        document.body.removeChild(link);
+      }
+    }, 100);
   } else {
     // Para navegadores de escritorio (WhatsApp Web)
     window.open(`https://web.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMessage}`, '_blank');
