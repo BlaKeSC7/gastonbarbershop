@@ -8,7 +8,7 @@ interface WhatsAppMessageData {
 
 const ADMIN_PHONE = '+18092033894';
 
-// Función para abrir WhatsApp con mensaje pre-escrito (compatible con iOS sin confirmación)
+// Función para abrir WhatsApp con mensaje pre-escrito (optimizada para iOS)
 export const openWhatsAppWithMessage = (phone: string, message: string) => {
   // Limpiar el número de teléfono
   const cleanPhone = phone.replace(/\D/g, '');
@@ -21,16 +21,8 @@ export const openWhatsAppWithMessage = (phone: string, message: string) => {
   const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   
   if (isIOS) {
-    // Para iOS - usar iframe para evitar confirmación
-    const iframe = document.createElement('iframe');
-    iframe.style.display = 'none';
-    iframe.src = `whatsapp://send?phone=${cleanPhone}&text=${encodedMessage}`;
-    document.body.appendChild(iframe);
-    
-    // Remover el iframe después de un momento
-    setTimeout(() => {
-      document.body.removeChild(iframe);
-    }, 100);
+    // Para iOS - usar wa.me directamente (más confiable)
+    window.location.href = `https://wa.me/${cleanPhone}?text=${encodedMessage}`;
   } else if (isMobile) {
     // Para Android móvil
     window.open(`https://wa.me/${cleanPhone}?text=${encodedMessage}`, '_blank');
