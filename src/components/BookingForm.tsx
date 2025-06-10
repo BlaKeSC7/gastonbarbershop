@@ -12,6 +12,20 @@ interface BookingFormProps {
   onSuccess: () => void;
 }
 
+// Función para generar el enlace de WhatsApp
+const getWhatsAppLink = (phone: string, message: string): string => {
+  const cleanPhone = phone.replace(/\D/g, '');
+  const encodedMessage = encodeURIComponent(message);
+  
+  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  
+  if (isIOS) {
+    return `whatsapp://send?phone=${cleanPhone}&text=${encodedMessage}`;
+  } else {
+    return `https://wa.me/${cleanPhone}?text=${encodedMessage}`;
+  }
+};
+
 const BookingForm: React.FC<BookingFormProps> = ({
   selectedDate,
   selectedTime,
@@ -24,6 +38,9 @@ const BookingForm: React.FC<BookingFormProps> = ({
     service: services[0]?.id || ''
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const ADMIN_PHONE = '+18092033894';
 
   const formatPhoneNumber = (value: string) => {
     const numbers = value.replace(/\D/g, '');
@@ -74,7 +91,10 @@ const BookingForm: React.FC<BookingFormProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validateForm()) return;
+    if (!validateForm() || isSubmitting) return;
+    
+    setIsSubmitting(true);
+    
     try {
       const cleanPhone = formData.clientPhone.replace(/\D/g, '');
       await createAppointment({
@@ -85,6 +105,25 @@ const BookingForm: React.FC<BookingFormProps> = ({
         service: formData.service,
         confirmed: true
       });
+
+      // Crear mensaje para WhatsApp
+      const selectedService = services.find(s => s.id === formData.service);
+      const adminMessage = `🔔 *NUEVA CITA REGISTRADA* 🔔
+
+✂️ *D' Gastón Stylo Barbería*
+
+👤 *Cliente:* ${formData.clientName.trim()}
+📱 *Teléfono:* ${formData.clientPhone}
+📅 *Fecha:* ${format(selectedDate, "dd/MM/yyyy", { locale: es })}
+🕒 *Hora:* ${selectedTime}
+💼 *Servicio:* ${selectedService?.name || 'Servicio seleccionado'}
+
+¡Nueva cita confirmada en el sistema!`;
+
+      // Abrir WhatsApp
+      const whatsappLink = getWhatsAppLink(ADMIN_PHONE, adminMessage);
+      window.location.href = whatsappLink;
+
       toast.success(
         <div>
           <p className="font-bold">¡Cita confirmada!</p>
@@ -92,6 +131,7 @@ const BookingForm: React.FC<BookingFormProps> = ({
         </div>,
         { duration: 5000 }
       );
+      
       onSuccess();
     } catch (error: any) {
       console.error('Error creating appointment:', error);
@@ -102,6 +142,8 @@ const BookingForm: React.FC<BookingFormProps> = ({
       } else {
         toast.error('Error al crear la cita. Por favor intenta nuevamente.');
       }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -187,9 +229,14 @@ const BookingForm: React.FC<BookingFormProps> = ({
         <div className="mt-6">
           <button
             type="submit"
-            className="w-full bg-red-600 text-white py-3 rounded-lg hover:bg-red-700 transition-colors"
+            disabled={isSubmitting}
+            className={`w-full py-3 rounded-lg transition-colors text-white font-medium ${
+              isSubmitting 
+                ? 'bg-gray-400 cursor-not-allowed' 
+                : 'bg-red-600 hover:bg-red-700'
+            }`}
           >
-            Confirmar cita
+            {isSubmitting ? 'Confirmando...' : 'Confirmar cita'}
           </button>
         </div>
       </form>

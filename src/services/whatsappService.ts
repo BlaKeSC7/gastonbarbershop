@@ -21,7 +21,7 @@ export const openWhatsAppWithMessage = (phone: string, message: string) => {
   const isAndroid = /Android/i.test(navigator.userAgent);
   
   if (isIOS || isAndroid) {
-    // Para móviles - crear enlace invisible y hacer click real
+    // Para móviles - crear enlace invisible y hacer click inmediato
     const a = document.createElement('a');
     a.href = `whatsapp://send?phone=${cleanPhone}&text=${encodedMessage}`;
     a.style.display = 'none';
@@ -29,11 +29,9 @@ export const openWhatsAppWithMessage = (phone: string, message: string) => {
     
     document.body.appendChild(a);
     
-    // Usar setTimeout para asegurar que el click sea procesado como acción del usuario
-    setTimeout(() => {
-      a.click();
-      document.body.removeChild(a);
-    }, 0);
+    // Click inmediato para mantener el contexto de usuario
+    a.click();
+    document.body.removeChild(a);
     
   } else {
     // Para navegadores de escritorio
@@ -41,7 +39,7 @@ export const openWhatsAppWithMessage = (phone: string, message: string) => {
   }
 };
 
-export const notifyAppointmentCreated = async (data: WhatsAppMessageData) => {
+export const notifyAppointmentCreated = (data: WhatsAppMessageData) => {
   const adminMessage = `🔔 *NUEVA CITA REGISTRADA* 🔔
 
 ✂️ *D' Gastón Stylo Barbería*
@@ -65,7 +63,7 @@ export const notifyAppointmentCreated = async (data: WhatsAppMessageData) => {
   }
 };
 
-export const notifyAppointmentCancelled = async (data: WhatsAppMessageData) => {
+export const notifyAppointmentCancelled = (data: WhatsAppMessageData) => {
   const adminMessage = `❌ *CITA CANCELADA* ❌
 
 ✂️ *D' Gastón Stylo Barbería*
@@ -82,6 +80,61 @@ export const notifyAppointmentCancelled = async (data: WhatsAppMessageData) => {
     // Solo enviar mensaje al admin/dueño
     openWhatsAppWithMessage(ADMIN_PHONE, adminMessage);
     
+    return { success: true };
+  } catch (error) {
+    console.error('Error abriendo WhatsApp:', error);
+    throw error;
+  }
+};
+
+// Función para notificar al cliente sobre su cita confirmada
+export const notifyClientAppointmentConfirmed = (data: WhatsAppMessageData) => {
+  const clientMessage = `✅ *CITA CONFIRMADA* ✅
+
+✂️ *D' Gastón Stylo Barbería*
+
+¡Hola ${data.clientName}! Tu cita ha sido confirmada:
+
+📅 *Fecha:* ${data.date}
+🕒 *Hora:* ${data.time}
+💼 *Servicio:* ${data.service}
+
+📍 *Dirección:* [Tu dirección aquí]
+
+⏰ Te recomendamos llegar 5 minutos antes.
+
+¡Nos vemos pronto! 💈`;
+
+  try {
+    openWhatsAppWithMessage(data.clientPhone, clientMessage);
+    return { success: true };
+  } catch (error) {
+    console.error('Error abriendo WhatsApp:', error);
+    throw error;
+  }
+};
+
+// Función para notificar al cliente sobre cancelación
+export const notifyClientAppointmentCancelled = (data: WhatsAppMessageData) => {
+  const clientMessage = `❌ *CITA CANCELADA* ❌
+
+✂️ *D' Gastón Stylo Barbería*
+
+Hola ${data.clientName}, 
+
+Tu cita programada para:
+📅 *Fecha:* ${data.date}
+🕒 *Hora:* ${data.time}
+💼 *Servicio:* ${data.service}
+
+Ha sido cancelada.
+
+💬 Si deseas reagendar, no dudes en contactarnos.
+
+¡Gracias por tu comprensión! 🙏`;
+
+  try {
+    openWhatsAppWithMessage(data.clientPhone, clientMessage);
     return { success: true };
   } catch (error) {
     console.error('Error abriendo WhatsApp:', error);
