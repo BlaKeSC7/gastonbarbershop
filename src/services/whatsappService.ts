@@ -8,47 +8,25 @@ interface WhatsAppMessageData {
 
 const ADMIN_PHONE = '+18092033894';
 
-// Variable para evitar ejecuciones múltiples
-let isExecuting = false;
-
-// Función para abrir WhatsApp directamente sin confirmación
+// Función para abrir WhatsApp Web con mensaje pre-escrito
 export const openWhatsAppWithMessage = (phone: string, message: string) => {
-  // Prevenir ejecuciones múltiples
-  if (isExecuting) return;
-  isExecuting = true;
-  
-  // Reset después de un tiempo
-  setTimeout(() => { isExecuting = false; }, 2000);
-  
   // Limpiar el número de teléfono
   const cleanPhone = phone.replace(/\D/g, '');
   
   // Codificar el mensaje para URL
   const encodedMessage = encodeURIComponent(message);
   
-  // Detectar el dispositivo
-  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-  const isAndroid = /Android/i.test(navigator.userAgent);
-  const isMobile = isIOS || isAndroid;
+  // Crear la URL de WhatsApp Web
+  const whatsappUrl = `https://wa.me/${cleanPhone}?text=${encodedMessage}`;
   
-  // URL de WhatsApp
-  const whatsappURL = isMobile 
-    ? `whatsapp://send?phone=${cleanPhone}&text=${encodedMessage}`
-    : `https://web.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMessage}`;
-  
-  if (isMobile) {
-    // Para móviles - usar window.location.href que mantiene mejor el contexto
-    window.location.href = whatsappURL;
-  } else {
-    // Para navegadores de escritorio
-    window.open(whatsappURL, '_blank', 'noopener,noreferrer');
-  }
+  // Abrir en una nueva ventana/pestaña
+  window.open(whatsappUrl, '_blank');
 };
 
-export const notifyAppointmentCreated = (data: WhatsAppMessageData) => {
+export const notifyAppointmentCreated = async (data: WhatsAppMessageData) => {
   const adminMessage = `🔔 *NUEVA CITA REGISTRADA* 🔔
 
-✂️ *D' Gastón Stylo Barber Shop* ✂️
+✂️ *D' Gastón Stylo Barbería*
 
 👤 *Cliente:* ${data.clientName}
 📱 *Teléfono:* ${data.clientPhone}
@@ -69,10 +47,10 @@ export const notifyAppointmentCreated = (data: WhatsAppMessageData) => {
   }
 };
 
-export const notifyAppointmentCancelled = (data: WhatsAppMessageData) => {
+export const notifyAppointmentCancelled = async (data: WhatsAppMessageData) => {
   const adminMessage = `❌ *CITA CANCELADA* ❌
 
-✂️ *D' Gastón Stylo Barberí*
+✂️ *D' Gastón Stylo Barbería*
 
 👤 *Cliente:* ${data.clientName}
 📱 *Teléfono:* ${data.clientPhone}
@@ -86,60 +64,6 @@ export const notifyAppointmentCancelled = (data: WhatsAppMessageData) => {
     // Solo enviar mensaje al admin/dueño
     openWhatsAppWithMessage(ADMIN_PHONE, adminMessage);
     
-    return { success: true };
-  } catch (error) {
-    console.error('Error abriendo WhatsApp:', error);
-    throw error;
-  }
-};
-
-// Función para notificar al cliente sobre su cita confirmada
-export const notifyClientAppointmentConfirmed = (data: WhatsAppMessageData) => {
-  const clientMessage = `✅ *CITA CONFIRMADA* ✅
-
-✂️ *D' Gastón Stylo Barber Shop* ✂️
-
-¡Nueva cita confirmada en el sistema!
-
-👤 *Cliente:* ${data.clientName}
-📱 *Teléfono:* ${data.clientPhone}
-📅 *Fecha:* ${data.date}
-🕒 *Hora:* ${data.time}
-
-📍 *Dirección:* Juan XXIII, Higuey
-
-⏰ Te recomendamos llegar 10  minutos antes.
-
-¡Nos vemos pronto! 💈`;
-
-  try {
-    openWhatsAppWithMessage(data.clientPhone, clientMessage);
-    return { success: true };
-  } catch (error) {
-    console.error('Error abriendo WhatsApp:', error);
-    throw error;
-  }
-};
-
-// Función para notificar al cliente sobre cancelación
-export const notifyClientAppointmentCancelled = (data: WhatsAppMessageData) => {
-  const clientMessage = `❌ *CITA CANCELADA* ❌
-
-✂️ *D' Gastón Stylo Barber Shop* ✂️
-
-Esta cita ha sido cancelada.
-
-H👤 *Cliente:* ${data.clientName}
-📱 *Teléfono:* ${data.clientPhone}
-📅 *Fecha:* ${data.date}
-🕒 *Hora:* ${data.time}
-
-💬 Si deseas reagendar, no dudes en contactarnos.
-
-¡Gracias por tu comprensión! 🙏`;
-
-  try {
-    openWhatsAppWithMessage(data.clientPhone, clientMessage);
     return { success: true };
   } catch (error) {
     console.error('Error abriendo WhatsApp:', error);
