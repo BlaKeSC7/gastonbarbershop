@@ -1,13 +1,17 @@
 import React from "react";
 import { useAppointments } from "../context/AppointmentContext";
-import { format } from "date-fns";
+import { format, isAfter, startOfDay } from "date-fns";
 import { es } from "date-fns/locale";
 
 const AppointmentList: React.FC = () => {
-  const { getFutureAppointments } = useAppointments();
+  const { appointments } = useAppointments();
 
-  // Obtener solo las citas futuras (incluyendo hoy)
-  const futureAppointments = getFutureAppointments();
+  // Filtrar solo las citas futuras (de hoy en adelante)
+  const today = startOfDay(new Date());
+  const futureAppointments = appointments.filter(appointment => 
+    isAfter(appointment.date, today) || 
+    format(appointment.date, 'yyyy-MM-dd') === format(today, 'yyyy-MM-dd')
+  );
 
   // Ordenar por fecha y hora
   const sortedAppointments = [...futureAppointments].sort((a, b) => {
@@ -60,9 +64,11 @@ const AppointmentList: React.FC = () => {
           </table>
         </div>
       )}
-      <div className="mt-4 text-sm text-gray-500">
-        Mostrando solo citas de hoy en adelante. Las citas pasadas se conservan para estadísticas.
-      </div>
+      {appointments.length > sortedAppointments.length && (
+        <div className="mt-4 text-sm text-gray-500">
+          Las citas pasadas se eliminan automáticamente del sistema.
+        </div>
+      )}
     </div>
   );
 };

@@ -3,13 +3,12 @@ import { Appointment, Holiday, BlockedTime } from '../types';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { notifyAppointmentCreated, notifyAppointmentCancelled } from '../services/whatsappService';
-import { formatDateForSupabase, parseSupabaseDate, isSameDate, isDateBefore, isFutureDate } from '../utils/dateUtils';
-import { format, startOfDay } from 'date-fns';
+import { formatDateForSupabase, parseSupabaseDate } from '../utils/dateUtils';
+import { format, isSameDay, startOfDay, isBefore } from 'date-fns';
 
 interface AdminSettings {
   early_booking_restriction: boolean;
   early_booking_hours: number;
-  restricted_hours: string[];
 }
 
 interface AppointmentContextType {
@@ -29,9 +28,8 @@ interface AppointmentContextType {
   getDayAvailability: (date: Date) => Promise<{ [hour: string]: boolean }>;
   getAvailableHoursForDate: (date: Date) => string[];
   formatHour12h: (hour24: string) => string;
+  cleanupPastAppointments: () => Promise<void>;
   loadAdminSettings: () => Promise<void>;
-  // Función para obtener solo citas futuras (para mostrar en admin)
-  getFutureAppointments: () => Appointment[];
 }
 
 // Genera un rango de horas en formato HH:00
@@ -67,37 +65,29 @@ const getAvailableHoursForDate = (date: Date): string[] => {
   }
 };
 
-// Convierte "15:00" en "3:00 PM" para mostrar en UI
+// Convierte "15:00" en "3:00 pm" para mostrar en UI
 const formatHour12h = (hour24: string): string => {
   if (!hour24) return '';
   const [h, m] = hour24.split(':');
   let hour = parseInt(h, 10);
   const minute = m || '00';
-  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const ampm = hour >= 12 ? 'pm' : 'am';
   hour = hour % 12 || 12;
   return `${hour}:${minute} ${ampm}`;
 };
 
-// Función para verificar restricción de horarios con antelación
-const isRestrictedHourWithAdvance = (date: Date, time: string, adminSettings: AdminSettings): boolean => {
+// Función para verificar restricción de horarios tempranos
+const isEarlyHourRestricted = (date: Date, time: string, adminSettings: AdminSettings): boolean => {
   if (!adminSettings.early_booking_restriction) return false;
   
-  // Verificar si el horario está en la lista de horarios restringidos
-  if (!adminSettings.restricted_hours?.includes(time)) return false;
+  // Solo aplica para 7:00 AM y 8:00 AM
+  if (time !== '7:00 AM' && time !== '8:00 AM') return false;
   
   const now = new Date();
   const appointmentDateTime = new Date(date);
   
-  // Convertir tiempo de 12h a 24h para comparación
-  let hour = 0;
-  if (time.includes('AM')) {
-    hour = parseInt(time.split(':')[0]);
-    if (hour === 12) hour = 0;
-  } else if (time.includes('PM')) {
-    hour = parseInt(time.split(':')[0]);
-    if (hour !== 12) hour += 12;
-  }
-  
+  // Convertir tiempo a 24h para comparación
+  const hour = time === '7:00 AM' ? 7 : 8;
   appointmentDateTime.setHours(hour, 0, 0, 0);
   
   const diffMs = appointmentDateTime.getTime() - now.getTime();
@@ -122,8 +112,7 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
   const [blockedTimes, setBlockedTimes] = useState<BlockedTime[]>([]);
   const [adminSettings, setAdminSettings] = useState<AdminSettings>({
     early_booking_restriction: false,
-    early_booking_hours: 12,
-    restricted_hours: ['7:00 AM', '8:00 AM']
+    early_booking_hours: 12
   });
   const [userPhone, setUserPhone] = useState<string | null>(() => localStorage.getItem('userPhone'));
 
@@ -142,8 +131,7 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
       if (data) {
         setAdminSettings({
           early_booking_restriction: data.early_booking_restriction,
-          early_booking_hours: data.early_booking_hours,
-          restricted_hours: data.restricted_hours || ['7:00 AM', '8:00 AM']
+          early_booking_hours: data.early_booking_hours
         });
       }
     } catch (error) {
@@ -151,14 +139,33 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
     }
   };
 
-  // Función para obtener solo citas futuras (incluyendo hoy)
-  const getFutureAppointments = useCallback((): Appointment[] => {
-    const today = new Date();
-    return appointments.filter(appointment => {
-      // Incluir citas de hoy y futuras
-      return isSameDate(appointment.date, today) || isFutureDate(appointment.date);
-    });
-  }, [appointments]);
+  // Función para limpiar citas pasadas
+  const cleanupPastAppointments = async () => {
+    try {
+      const today = startOfDay(new Date());
+      const todayFormatted = formatDateForSupabase(today);
+      
+      // Eliminar citas anteriores a hoy
+      const { error } = await supabase
+        .from('appointments')
+        .delete()
+        .lt('date', todayFormatted);
+      
+      if (error) {
+        console.error('Error cleaning up past appointments:', error);
+        return;
+      }
+      
+      // Actualizar el estado local
+      setAppointments(prev => 
+        prev.filter(appointment => !isBefore(appointment.date, today))
+      );
+      
+      console.log('Past appointments cleaned up successfully');
+    } catch (error) {
+      console.error('Error in cleanupPastAppointments:', error);
+    }
+  };
 
   const fetchAppointments = async () => {
     try {
@@ -186,7 +193,7 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
       if (error) throw error;
       const formattedHolidays = data.map(holiday => ({
         ...holiday,
-        date: parseSupabaseDate(holiday.date)
+        date: new Date(holiday.date)
       }));
       setHolidays(formattedHolidays);
     } catch (error) {
@@ -203,7 +210,7 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
       if (error) throw error;
       const formattedBlockedTimes = data.map(blockedTime => ({
         ...blockedTime,
-        date: parseSupabaseDate(blockedTime.date)
+        date: new Date(blockedTime.date)
       }));
       setBlockedTimes(formattedBlockedTimes);
     } catch (error) {
@@ -215,7 +222,9 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
     const initializeData = async () => {
       // Primero cargar configuración de admin
       await loadAdminSettings();
-      // Cargar todos los datos (ya no limpiamos citas pasadas)
+      // Luego limpiar citas pasadas
+      await cleanupPastAppointments();
+      // Finalmente cargar todos los datos
       await Promise.all([
         fetchAppointments(),
         fetchHolidays(),
@@ -228,8 +237,8 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
 
   const isTimeSlotAvailable = useCallback(async (date: Date, time: string): Promise<boolean> => {
     try {
-      // Verificar restricción de horarios con antelación
-      if (isRestrictedHourWithAdvance(date, time, adminSettings)) {
+      // Verificar restricción de horarios tempranos
+      if (isEarlyHourRestricted(date, time, adminSettings)) {
         return false;
       }
 
@@ -239,7 +248,6 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
         supabase.from('blocked_times').select('time,timeSlots').eq('date', formattedDate),
         supabase.from('appointments').select('id,time').eq('date', formattedDate).eq('time', time)
       ]);
-      
       if (holidaysData && holidaysData.length > 0) return false;
       if (blockedData && blockedData.some(block =>
         (block.time && block.time === time) ||
@@ -287,7 +295,7 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
     }
 
     for (const hour of hours) {
-      const isRestricted = isRestrictedHourWithAdvance(date, hour, adminSettings);
+      const isRestricted = isEarlyHourRestricted(date, hour, adminSettings);
       availability[hour] = !(blockedSlots.has(hour) || takenSlots.has(hour) || isRestricted);
     }
     return availability;
@@ -295,10 +303,9 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
 
   const createAppointment = async (appointmentData: CreateAppointmentData): Promise<Appointment> => {
     try {
-      // Verificar restricción de horarios con antelación antes de crear
-      if (isRestrictedHourWithAdvance(appointmentData.date, appointmentData.time, adminSettings)) {
-        const restrictedHours = adminSettings.restricted_hours?.join(', ') || 'ciertos horarios';
-        throw new Error(`Los horarios ${restrictedHours} requieren reserva con ${adminSettings.early_booking_hours} horas de antelación`);
+      // Verificar restricción de horarios tempranos antes de crear
+      if (isEarlyHourRestricted(appointmentData.date, appointmentData.time, adminSettings)) {
+        throw new Error(`Este horario requiere reserva con ${adminSettings.early_booking_hours} horas de antelación`);
       }
 
       const formattedDate = formatDateForSupabase(appointmentData.date);
@@ -456,8 +463,8 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
     getDayAvailability,
     getAvailableHoursForDate,
     formatHour12h,
+    cleanupPastAppointments,
     loadAdminSettings,
-    getFutureAppointments,
   };
 
   return (

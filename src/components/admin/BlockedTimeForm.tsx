@@ -59,29 +59,7 @@ const BlockedTimeForm: React.FC<BlockedTimeFormProps> = ({ onBlockTime }) => {
     }
   };
   
-  // Horarios específicos por día de la semana en formato 12h
-  const getHoursForDay = (date: Date): string[] => {
-    const dayOfWeek = date.getDay();
-    
-    if (dayOfWeek === 0) {
-      // Domingo: 10:00 AM a 3:00 PM
-      return ['10:00 AM', '11:00 AM', '12:00 PM', '1:00 PM', '2:00 PM', '3:00 PM'];
-    } else if (dayOfWeek === 3) {
-      // Miércoles: 7:00 AM a 12:00 PM y 3:00 PM a 7:00 PM
-      return [
-        '7:00 AM', '8:00 AM', '9:00 AM', '10:00 AM', '11:00 AM', '12:00 PM',
-        '3:00 PM', '4:00 PM', '5:00 PM', '6:00 PM', '7:00 PM'
-      ];
-    } else {
-      // Resto de días: horarios normales
-      return [
-        '7:00 AM', '8:00 AM', '9:00 AM', '10:00 AM', '11:00 AM', '12:00 PM',
-        '3:00 PM', '4:00 PM', '5:00 PM', '6:00 PM', '7:00 PM', '8:00 PM'
-      ];
-    }
-  };
-  
-  const availableTimeSlots = date ? getHoursForDay(date) : [];
+  const availableTimeSlots = date ? generateTimeSlots(date) : [];
   
   return (
     <div className="bg-gray-50 p-4 rounded-lg">
@@ -146,7 +124,7 @@ const BlockedTimeForm: React.FC<BlockedTimeFormProps> = ({ onBlockTime }) => {
                       checked={selectedTimes.includes(time)}
                       onChange={() => handleTimeToggle(time)}
                     />
-                    <span className="text-sm">{time}</span>
+                    <span>{time}</span>
                   </label>
                 ))}
               </div>

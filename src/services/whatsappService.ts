@@ -6,7 +6,7 @@ interface WhatsAppMessageData {
   service: string;
 }
 
-const ADMIN_PHONE = '+18092033894';
+const ADMIN_PHONE = '+18497108953';
 
 // Función para abrir WhatsApp Web con mensaje pre-escrito
 export const openWhatsAppWithMessage = (phone: string, message: string) => {
@@ -26,7 +26,7 @@ export const openWhatsAppWithMessage = (phone: string, message: string) => {
 export const notifyAppointmentCreated = async (data: WhatsAppMessageData) => {
   const adminMessage = `🔔 *NUEVA CITA REGISTRADA* 🔔
 
-✂️ *D' Gastón Stylo Barbería*
+✂️ *Sistema de Agenda*
 
 👤 *Cliente:* ${data.clientName}
 📱 *Teléfono:* ${data.clientPhone}
@@ -50,7 +50,7 @@ export const notifyAppointmentCreated = async (data: WhatsAppMessageData) => {
 export const notifyAppointmentCancelled = async (data: WhatsAppMessageData) => {
   const adminMessage = `❌ *CITA CANCELADA* ❌
 
-✂️ *D' Gastón Stylo Barbería*
+✂️ *Sistema de Agenda*
 
 👤 *Cliente:* ${data.clientName}
 📱 *Teléfono:* ${data.clientPhone}
