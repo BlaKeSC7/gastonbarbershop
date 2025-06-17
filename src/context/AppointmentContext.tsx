@@ -1,37 +1,51 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback } from 'react';
-import { Appointment, Holiday, BlockedTime } from '../types';
+import { Appointment, Holiday, BlockedTime, Barber, BusinessHours, BarberSchedule, AdminSettings, Review, CreateReviewData } from '../types';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { notifyAppointmentCreated, notifyAppointmentCancelled } from '../services/whatsappService';
 import { formatDateForSupabase, parseSupabaseDate, isSameDate, isDateBefore, isFutureDate } from '../utils/dateUtils';
 import { format, startOfDay } from 'date-fns';
 
-interface AdminSettings {
-  early_booking_restriction: boolean;
-  early_booking_hours: number;
-  restricted_hours: string[];
-}
-
 interface AppointmentContextType {
   appointments: Appointment[];
   holidays: Holiday[];
   blockedTimes: BlockedTime[];
+  barbers: Barber[];
+  businessHours: BusinessHours[];
+  barberSchedules: BarberSchedule[];
   adminSettings: AdminSettings;
+  reviews: Review[];
   userPhone: string | null;
   setUserPhone: (phone: string) => void;
-  deleteAppointment: (id: string) => Promise<void>;
+  cancelAppointment: (id: string) => Promise<void>;
   createAppointment: (appointmentData: CreateAppointmentData) => Promise<Appointment>;
   createHoliday: (holidayData: Omit<Holiday, 'id'>) => Promise<Holiday>;
   createBlockedTime: (blockedTimeData: Omit<BlockedTime, 'id'>) => Promise<BlockedTime>;
   removeHoliday: (id: string) => Promise<void>;
   removeBlockedTime: (id: string) => Promise<void>;
-  isTimeSlotAvailable: (date: Date, time: string) => Promise<boolean>;
-  getDayAvailability: (date: Date) => Promise<{ [hour: string]: boolean }>;
-  getAvailableHoursForDate: (date: Date) => string[];
+  isTimeSlotAvailable: (date: Date, time: string, barberId?: string) => Promise<boolean>;
+  getDayAvailability: (date: Date, barberId?: string) => Promise<{ [hour: string]: boolean }>;
+  getAvailableHoursForDate: (date: Date, barberId?: string) => string[];
   formatHour12h: (hour24: string) => string;
   loadAdminSettings: () => Promise<void>;
-  // Función para obtener solo citas futuras (para mostrar en admin)
   getFutureAppointments: () => Appointment[];
+  getActiveAppointments: () => Appointment[];
+  // Funciones para barberos
+  createBarber: (barberData: Omit<Barber, 'id' | 'created_at' | 'updated_at'>) => Promise<Barber>;
+  updateBarber: (id: string, barberData: Partial<Barber>) => Promise<void>;
+  deleteBarber: (id: string) => Promise<void>;
+  // Funciones para horarios de negocio
+  updateBusinessHours: (dayOfWeek: number, hours: Partial<BusinessHours>) => Promise<void>;
+  // Funciones para horarios de barberos
+  updateBarberSchedule: (barberId: string, dayOfWeek: number, schedule: Partial<BarberSchedule>) => Promise<void>;
+  // Función para actualizar configuración
+  updateAdminSettings: (settings: Partial<AdminSettings>) => Promise<void>;
+  // Funciones para reseñas
+  createReview: (reviewData: CreateReviewData) => Promise<Review>;
+  updateReview: (id: string, reviewData: Partial<Review>) => Promise<void>;
+  deleteReview: (id: string) => Promise<void>;
+  getApprovedReviews: () => Review[];
+  getAverageRating: () => number;
 }
 
 // Genera un rango de horas en formato HH:00
@@ -41,30 +55,6 @@ const generateHoursRange = (start: number, end: number) => {
     hours.push(`${h.toString().padStart(2, '0')}:00`);
   }
   return hours;
-};
-
-// HORARIOS ACTUALIZADOS:
-// Domingo: 10:00 a 15:00
-// Miércoles: 7:00 a 12:00 y 15:00 a 19:00 (cierra a las 7 PM)
-// Resto: 7:00 a 12:00 y 15:00 a 21:00
-const getAvailableHoursForDate = (date: Date): string[] => {
-  const weekday = date.getDay();
-  if (weekday === 0) {
-    // Domingo: 10:00 AM a 3:00 PM
-    return generateHoursRange(10, 15);
-  } else if (weekday === 3) {
-    // Miércoles: 7:00 AM a 12:00 PM y 3:00 PM a 7:00 PM
-    return [
-      ...generateHoursRange(7, 12),
-      ...generateHoursRange(15, 19)
-    ];
-  } else {
-    // Lunes, martes, jueves, viernes, sábado: 7:00 AM a 12:00 PM y 3:00 PM a 9:00 PM
-    return [
-      ...generateHoursRange(7, 12),
-      ...generateHoursRange(15, 21)
-    ];
-  }
 };
 
 // Convierte "15:00" en "3:00 PM" para mostrar en UI
@@ -120,10 +110,19 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [blockedTimes, setBlockedTimes] = useState<BlockedTime[]>([]);
+  const [barbers, setBarbers] = useState<Barber[]>([]);
+  const [businessHours, setBusinessHours] = useState<BusinessHours[]>([]);
+  const [barberSchedules, setBarberSchedules] = useState<BarberSchedule[]>([]);
+  const [reviews, setReviews] = useState<Review[]>([]);
   const [adminSettings, setAdminSettings] = useState<AdminSettings>({
+    id: '',
     early_booking_restriction: false,
     early_booking_hours: 12,
-    restricted_hours: ['7:00 AM', '8:00 AM']
+    restricted_hours: ['7:00 AM', '8:00 AM'],
+    multiple_barbers_enabled: false,
+    reviews_enabled: true,
+    created_at: '',
+    updated_at: ''
   });
   const [userPhone, setUserPhone] = useState<string | null>(() => localStorage.getItem('userPhone'));
 
@@ -140,31 +139,107 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
       }
 
       if (data) {
-        setAdminSettings({
-          early_booking_restriction: data.early_booking_restriction,
-          early_booking_hours: data.early_booking_hours,
-          restricted_hours: data.restricted_hours || ['7:00 AM', '8:00 AM']
-        });
+        setAdminSettings(data);
       }
     } catch (error) {
       console.error('Error loading admin settings:', error);
     }
   };
 
-  // Función para obtener solo citas futuras (incluyendo hoy)
+  // Función para obtener solo citas futuras activas (no canceladas)
   const getFutureAppointments = useCallback((): Appointment[] => {
     const today = new Date();
     return appointments.filter(appointment => {
-      // Incluir citas de hoy y futuras
-      return isSameDate(appointment.date, today) || isFutureDate(appointment.date);
+      return !appointment.cancelled && (isSameDate(appointment.date, today) || isFutureDate(appointment.date));
     });
   }, [appointments]);
+
+  // Función para obtener citas activas (no canceladas)
+  const getActiveAppointments = useCallback((): Appointment[] => {
+    return appointments.filter(appointment => !appointment.cancelled);
+  }, [appointments]);
+
+  // Función para obtener horarios disponibles según configuración (con soporte para barberos específicos)
+  const getAvailableHoursForDate = useCallback((date: Date, barberId?: string): string[] => {
+    const dayOfWeek = date.getDay();
+    
+    // Si hay barberId específico y horarios de barbero habilitados, usar horarios del barbero
+    if (barberId && adminSettings.multiple_barbers_enabled) {
+      const barberSchedule = barberSchedules.find(bs => 
+        bs.barber_id === barberId && bs.day_of_week === dayOfWeek
+      );
+      
+      if (barberSchedule && !barberSchedule.is_available) {
+        return []; // Barbero no disponible este día
+      }
+      
+      if (barberSchedule) {
+        const hours: string[] = [];
+        
+        // Horarios de mañana del barbero
+        if (barberSchedule.morning_start && barberSchedule.morning_end) {
+          const startHour = parseInt(barberSchedule.morning_start.split(':')[0]);
+          const endHour = parseInt(barberSchedule.morning_end.split(':')[0]);
+          hours.push(...generateHoursRange(startHour, endHour - 1));
+        }
+        
+        // Horarios de tarde del barbero
+        if (barberSchedule.afternoon_start && barberSchedule.afternoon_end) {
+          const startHour = parseInt(barberSchedule.afternoon_start.split(':')[0]);
+          const endHour = parseInt(barberSchedule.afternoon_end.split(':')[0]);
+          hours.push(...generateHoursRange(startHour, endHour - 1));
+        }
+        
+        return hours.map(formatHour12h);
+      }
+    }
+    
+    // Usar horarios generales del negocio
+    const dayHours = businessHours.find(bh => bh.day_of_week === dayOfWeek);
+    
+    if (!dayHours || !dayHours.is_open) return [];
+    
+    const hours: string[] = [];
+    
+    // Horarios de mañana
+    if (dayHours.morning_start && dayHours.morning_end) {
+      const startHour = parseInt(dayHours.morning_start.split(':')[0]);
+      const endHour = parseInt(dayHours.morning_end.split(':')[0]);
+      hours.push(...generateHoursRange(startHour, endHour - 1));
+    }
+    
+    // Horarios de tarde
+    if (dayHours.afternoon_start && dayHours.afternoon_end) {
+      const startHour = parseInt(dayHours.afternoon_start.split(':')[0]);
+      const endHour = parseInt(dayHours.afternoon_end.split(':')[0]);
+      hours.push(...generateHoursRange(startHour, endHour - 1));
+    }
+    
+    return hours.map(formatHour12h);
+  }, [businessHours, barberSchedules, adminSettings.multiple_barbers_enabled]);
+
+  // Función para obtener reseñas aprobadas
+  const getApprovedReviews = useCallback((): Review[] => {
+    return reviews.filter(review => review.is_approved);
+  }, [reviews]);
+
+  // Función para calcular calificación promedio
+  const getAverageRating = useCallback((): number => {
+    const approvedReviews = getApprovedReviews();
+    if (approvedReviews.length === 0) return 0;
+    
+    const totalRating = approvedReviews.reduce((sum, review) => sum + review.rating, 0);
+    return Math.round((totalRating / approvedReviews.length) * 10) / 10;
+  }, [getApprovedReviews]);
 
   const fetchAppointments = async () => {
     try {
       const { data, error } = await supabase
         .from('appointments')
-        .select('*')
+        .select(`
+          *,
+          barber:barbers(id, name)
+        `)
         .order('date', { ascending: true });
       if (error) throw error;
       const formattedAppointments = data.map(appointment => ({
@@ -211,22 +286,80 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
     }
   };
 
+  const fetchBarbers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('barbers')
+        .select('*')
+        .eq('is_active', true)
+        .order('name', { ascending: true });
+      if (error) throw error;
+      setBarbers(data || []);
+    } catch (error) {
+      toast.error('Error al cargar los barberos');
+    }
+  };
+
+  const fetchBusinessHours = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('business_hours')
+        .select('*')
+        .order('day_of_week', { ascending: true });
+      if (error) throw error;
+      setBusinessHours(data || []);
+    } catch (error) {
+      toast.error('Error al cargar los horarios de negocio');
+    }
+  };
+
+  const fetchBarberSchedules = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('barber_schedules')
+        .select('*')
+        .order('barber_id, day_of_week', { ascending: true });
+      if (error) throw error;
+      setBarberSchedules(data || []);
+    } catch (error) {
+      toast.error('Error al cargar los horarios de barberos');
+    }
+  };
+
+  const fetchReviews = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('reviews')
+        .select(`
+          *,
+          barber:barbers(id, name)
+        `)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      setReviews(data || []);
+    } catch (error) {
+      toast.error('Error al cargar las reseñas');
+    }
+  };
+
   useEffect(() => {
     const initializeData = async () => {
-      // Primero cargar configuración de admin
       await loadAdminSettings();
-      // Cargar todos los datos (ya no limpiamos citas pasadas)
       await Promise.all([
         fetchAppointments(),
         fetchHolidays(),
-        fetchBlockedTimes()
+        fetchBlockedTimes(),
+        fetchBarbers(),
+        fetchBusinessHours(),
+        fetchBarberSchedules(),
+        fetchReviews()
       ]);
     };
     
     initializeData();
   }, []);
 
-  const isTimeSlotAvailable = useCallback(async (date: Date, time: string): Promise<boolean> => {
+  const isTimeSlotAvailable = useCallback(async (date: Date, time: string, barberId?: string): Promise<boolean> => {
     try {
       // Verificar restricción de horarios con antelación
       if (isRestrictedHourWithAdvance(date, time, adminSettings)) {
@@ -234,33 +367,59 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
       }
 
       const formattedDate = formatDateForSupabase(date);
-      const [{ data: holidaysData }, { data: blockedData }, { data: appointmentsData }] = await Promise.all([
-        supabase.from('holidays').select('id').eq('date', formattedDate),
-        supabase.from('blocked_times').select('time,timeSlots').eq('date', formattedDate),
-        supabase.from('appointments').select('id,time').eq('date', formattedDate).eq('time', time)
-      ]);
+      
+      // Verificar feriados
+      const { data: holidaysData } = await supabase
+        .from('holidays')
+        .select('id')
+        .eq('date', formattedDate);
       
       if (holidaysData && holidaysData.length > 0) return false;
+      
+      // Verificar horarios bloqueados
+      const { data: blockedData } = await supabase
+        .from('blocked_times')
+        .select('time,timeSlots')
+        .eq('date', formattedDate);
+      
       if (blockedData && blockedData.some(block =>
         (block.time && block.time === time) ||
         (block.timeSlots && Array.isArray(block.timeSlots) && block.timeSlots.includes(time))
       )) return false;
+      
+      // Verificar citas existentes
+      let appointmentQuery = supabase
+        .from('appointments')
+        .select('id,time')
+        .eq('date', formattedDate)
+        .eq('time', time)
+        .eq('cancelled', false);
+      
+      if (barberId) {
+        appointmentQuery = appointmentQuery.eq('barber_id', barberId);
+      }
+      
+      const { data: appointmentsData } = await appointmentQuery;
+      
       if (appointmentsData && appointmentsData.length > 0) return false;
+      
       return true;
     } catch (err) {
       return false;
     }
   }, [adminSettings]);
 
-  const getDayAvailability = useCallback(async (date: Date) => {
+  const getDayAvailability = useCallback(async (date: Date, barberId?: string) => {
     const formattedDate = formatDateForSupabase(date);
-    const hours = getAvailableHoursForDate(date);
+    const hours = getAvailableHoursForDate(date, barberId);
     if (hours.length === 0) return {};
 
     const [{ data: holidaysData }, { data: blockedData }, { data: appointmentsData }] = await Promise.all([
       supabase.from('holidays').select('id').eq('date', formattedDate),
       supabase.from('blocked_times').select('time,timeSlots').eq('date', formattedDate),
-      supabase.from('appointments').select('time').eq('date', formattedDate),
+      barberId 
+        ? supabase.from('appointments').select('time').eq('date', formattedDate).eq('barber_id', barberId).eq('cancelled', false)
+        : supabase.from('appointments').select('time').eq('date', formattedDate).eq('cancelled', false),
     ]);
 
     const availability: { [hour: string]: boolean } = {};
@@ -291,7 +450,7 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
       availability[hour] = !(blockedSlots.has(hour) || takenSlots.has(hour) || isRestricted);
     }
     return availability;
-  }, [adminSettings]);
+  }, [adminSettings, getAvailableHoursForDate]);
 
   const createAppointment = async (appointmentData: CreateAppointmentData): Promise<Appointment> => {
     try {
@@ -302,21 +461,43 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
       }
 
       const formattedDate = formatDateForSupabase(appointmentData.date);
+      
+      // Usar el barberId que viene en appointmentData, no el por defecto
+      const barberId = appointmentData.barber_id || appointmentData.barberId || adminSettings.default_barber_id;
+      
       const { data: newAppointment, error } = await supabase
         .from('appointments')
-        .insert([{ ...appointmentData, date: formattedDate }])
-        .select()
+        .insert([{ 
+          date: formattedDate,
+          time: appointmentData.time,
+          clientName: appointmentData.clientName,
+          clientPhone: appointmentData.clientPhone,
+          service: appointmentData.service,
+          confirmed: appointmentData.confirmed,
+          barber_id: barberId,
+          cancelled: false
+        }])
+        .select(`
+          *,
+          barber:barbers(id, name, phone)
+        `)
         .single();
       if (error) throw new Error('Error al crear la cita en la base de datos');
       
       try {
+        // Obtener el barbero para la notificación
+        const barber = barbers.find(b => b.id === barberId) || newAppointment.barber;
+        const barberPhone = barber?.phone || '+18092033894';
+        
         // Enviar notificaciones por WhatsApp Web
         await notifyAppointmentCreated({
           clientPhone: appointmentData.clientPhone,
           clientName: appointmentData.clientName,
           date: format(appointmentData.date, 'dd/MM/yyyy'),
           time: appointmentData.time,
-          service: appointmentData.service
+          service: appointmentData.service,
+          barberName: barber?.name || 'Barbero',
+          barberPhone
         });
       } catch (whatsappError) {
         console.error('Error enviando WhatsApp:', whatsappError);
@@ -336,31 +517,50 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
     }
   };
 
-  const deleteAppointment = async (id: string): Promise<void> => {
+  const cancelAppointment = async (id: string): Promise<void> => {
     try {
-      const appointmentToDelete = appointments.find(app => app.id === id);
-      if (!appointmentToDelete) return;
+      const appointmentToCancel = appointments.find(app => app.id === id);
+      if (!appointmentToCancel) return;
       
-      const { error } = await supabase.from('appointments').delete().eq('id', id);
+      // Marcar como cancelada en lugar de borrar
+      const { error } = await supabase
+        .from('appointments')
+        .update({ 
+          cancelled: true, 
+          cancelled_at: new Date().toISOString() 
+        })
+        .eq('id', id);
       if (error) throw error;
       
-      setAppointments(prev => prev.filter(app => app.id !== id));
+      setAppointments(prev => prev.map(app => 
+        app.id === id 
+          ? { ...app, cancelled: true, cancelled_at: new Date().toISOString() }
+          : app
+      ));
       
       try {
+        // Obtener el barbero para la notificación
+        const barber = barbers.find(b => b.id === appointmentToCancel.barber_id);
+        const barberPhone = barber?.phone || '+18092033894';
+        
         // Enviar notificaciones de cancelación por WhatsApp Web
         await notifyAppointmentCancelled({
-          clientPhone: appointmentToDelete.clientPhone,
-          clientName: appointmentToDelete.clientName,
-          date: format(appointmentToDelete.date, 'dd/MM/yyyy'),
-          time: appointmentToDelete.time,
-          service: appointmentToDelete.service
+          clientPhone: appointmentToCancel.clientPhone,
+          clientName: appointmentToCancel.clientName,
+          date: format(appointmentToCancel.date, 'dd/MM/yyyy'),
+          time: appointmentToCancel.time,
+          service: appointmentToCancel.service,
+          barberName: barber?.name || 'Barbero',
+          barberPhone
         });
       } catch (whatsappError) {
         console.error('Error enviando WhatsApp de cancelación:', whatsappError);
       }
 
+      toast.success('Cita cancelada exitosamente');
     } catch (error) {
-      console.error('Error deleting appointment:', error);
+      console.error('Error cancelling appointment:', error);
+      toast.error('Error al cancelar la cita');
     }
   };
 
@@ -434,6 +634,163 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
     }
   };
 
+  // Funciones para barberos
+  const createBarber = async (barberData: Omit<Barber, 'id' | 'created_at' | 'updated_at'>): Promise<Barber> => {
+    try {
+      const { data, error } = await supabase
+        .from('barbers')
+        .insert([barberData])
+        .select()
+        .single();
+      if (error) throw error;
+      setBarbers(prev => [...prev, data]);
+      toast.success('Barbero agregado exitosamente');
+      return data;
+    } catch (error) {
+      toast.error('Error al agregar barbero');
+      throw error;
+    }
+  };
+
+  const updateBarber = async (id: string, barberData: Partial<Barber>): Promise<void> => {
+    try {
+      const { error } = await supabase
+        .from('barbers')
+        .update(barberData)
+        .eq('id', id);
+      if (error) throw error;
+      setBarbers(prev => prev.map(b => b.id === id ? { ...b, ...barberData } : b));
+      toast.success('Barbero actualizado exitosamente');
+    } catch (error) {
+      toast.error('Error al actualizar barbero');
+      throw error;
+    }
+  };
+
+  const deleteBarber = async (id: string): Promise<void> => {
+    try {
+      const { error } = await supabase
+        .from('barbers')
+        .update({ is_active: false })
+        .eq('id', id);
+      if (error) throw error;
+      setBarbers(prev => prev.filter(b => b.id !== id));
+      toast.success('Barbero desactivado exitosamente');
+    } catch (error) {
+      toast.error('Error al desactivar barbero');
+      throw error;
+    }
+  };
+
+  // Funciones para horarios de negocio
+  const updateBusinessHours = async (dayOfWeek: number, hours: Partial<BusinessHours>): Promise<void> => {
+    try {
+      const { error } = await supabase
+        .from('business_hours')
+        .upsert({ 
+          day_of_week: dayOfWeek, 
+          ...hours,
+          updated_at: new Date().toISOString()
+        });
+      if (error) throw error;
+      await fetchBusinessHours();
+      toast.success('Horarios actualizados exitosamente');
+    } catch (error) {
+      toast.error('Error al actualizar horarios');
+      throw error;
+    }
+  };
+
+  // Funciones para horarios de barberos
+  const updateBarberSchedule = async (barberId: string, dayOfWeek: number, schedule: Partial<BarberSchedule>): Promise<void> => {
+    try {
+      const { error } = await supabase
+        .from('barber_schedules')
+        .upsert({ 
+          barber_id: barberId,
+          day_of_week: dayOfWeek, 
+          ...schedule,
+          updated_at: new Date().toISOString()
+        });
+      if (error) throw error;
+      await fetchBarberSchedules();
+      toast.success('Horario del barbero actualizado exitosamente');
+    } catch (error) {
+      toast.error('Error al actualizar horario del barbero');
+      throw error;
+    }
+  };
+
+  // Función para actualizar configuración
+  const updateAdminSettings = async (settings: Partial<AdminSettings>): Promise<void> => {
+    try {
+      const { error } = await supabase
+        .from('admin_settings')
+        .update({
+          ...settings,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', adminSettings.id);
+      if (error) throw error;
+      setAdminSettings(prev => ({ ...prev, ...settings }));
+      toast.success('Configuración actualizada exitosamente');
+    } catch (error) {
+      toast.error('Error al actualizar configuración');
+      throw error;
+    }
+  };
+
+  // Funciones para reseñas
+  const createReview = async (reviewData: CreateReviewData): Promise<Review> => {
+    try {
+      const { data, error } = await supabase
+        .from('reviews')
+        .insert([reviewData])
+        .select(`
+          *,
+          barber:barbers(id, name)
+        `)
+        .single();
+      if (error) throw error;
+      setReviews(prev => [data, ...prev]);
+      toast.success('Reseña enviada exitosamente');
+      return data;
+    } catch (error) {
+      toast.error('Error al enviar la reseña');
+      throw error;
+    }
+  };
+
+  const updateReview = async (id: string, reviewData: Partial<Review>): Promise<void> => {
+    try {
+      const { error } = await supabase
+        .from('reviews')
+        .update({
+          ...reviewData,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', id);
+      if (error) throw error;
+      setReviews(prev => prev.map(r => r.id === id ? { ...r, ...reviewData } : r));
+      toast.success('Reseña actualizada exitosamente');
+    } catch (error) {
+      toast.error('Error al actualizar la reseña');
+      throw error;
+    }
+  };
+
+  const deleteReview = async (id: string): Promise<void> => {
+    try {
+      const { error } = await supabase.from('reviews').delete().eq('id', id);
+      if (error) throw error;
+      setReviews(prev => prev.filter(r => r.id !== id));
+      toast.success('Reseña eliminada exitosamente');
+    } catch (error) {
+      toast.error('Error al eliminar la reseña');
+      throw error;
+    }
+  };
+
   const handleSetUserPhone = (phone: string) => {
     setUserPhone(phone);
     localStorage.setItem('userPhone', phone);
@@ -443,10 +800,14 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
     appointments,
     holidays,
     blockedTimes,
+    barbers,
+    businessHours,
+    barberSchedules,
     adminSettings,
+    reviews,
     userPhone,
     setUserPhone: handleSetUserPhone,
-    deleteAppointment,
+    cancelAppointment,
     createAppointment,
     createHoliday,
     removeHoliday,
@@ -458,6 +819,18 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
     formatHour12h,
     loadAdminSettings,
     getFutureAppointments,
+    getActiveAppointments,
+    createBarber,
+    updateBarber,
+    deleteBarber,
+    updateBusinessHours,
+    updateBarberSchedule,
+    updateAdminSettings,
+    createReview,
+    updateReview,
+    deleteReview,
+    getApprovedReviews,
+    getAverageRating,
   };
 
   return (

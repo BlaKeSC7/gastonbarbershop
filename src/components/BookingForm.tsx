@@ -3,25 +3,28 @@ import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { services } from '../utils/mockData';
 import { useAppointments } from '../context/AppointmentContext';
-import { Phone, MessageSquare, Calendar as CalendarIcon, Clock as ClockIcon } from 'lucide-react';
+import { Phone, MessageSquare, Calendar as CalendarIcon, Clock as ClockIcon, User } from 'lucide-react';
 import { es } from 'date-fns/locale';
 
 interface BookingFormProps {
   selectedDate: Date;
   selectedTime: string;
+  selectedBarberId?: string;
   onSuccess: () => void;
 }
 
 const BookingForm: React.FC<BookingFormProps> = ({
   selectedDate,
   selectedTime,
+  selectedBarberId,
   onSuccess
 }) => {
-  const { createAppointment } = useAppointments();
+  const { createAppointment, barbers, adminSettings } = useAppointments();
   const [formData, setFormData] = useState({
     clientName: '',
     clientPhone: '',
-    service: services[0]?.id || ''
+    service: services[0]?.id || '',
+    barber_id: selectedBarberId || adminSettings.default_barber_id || ''
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -68,6 +71,9 @@ const BookingForm: React.FC<BookingFormProps> = ({
     } else if (!/^\d{3}-\d{3}-\d{4}$/.test(formData.clientPhone)) {
       newErrors.clientPhone = 'Formato: 555-123-4567';
     }
+    if (adminSettings.multiple_barbers_enabled && !formData.barber_id) {
+      newErrors.barber_id = 'Debe seleccionar un barbero';
+    }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -77,12 +83,17 @@ const BookingForm: React.FC<BookingFormProps> = ({
     if (!validateForm()) return;
     try {
       const cleanPhone = formData.clientPhone.replace(/\D/g, '');
+      
+      // Usar el barbero seleccionado o el por defecto
+      const finalBarberId = selectedBarberId || formData.barber_id || adminSettings.default_barber_id;
+      
       await createAppointment({
         date: selectedDate,
         time: selectedTime,
         clientName: formData.clientName.trim(),
         clientPhone: cleanPhone,
         service: formData.service,
+        barber_id: finalBarberId, // Asegurar que se use el barbero correcto
         confirmed: true
       });
       toast.success(
@@ -105,10 +116,15 @@ const BookingForm: React.FC<BookingFormProps> = ({
     }
   };
 
+  const getBarberName = (barberId: string) => {
+    const barber = barbers.find(b => b.id === barberId);
+    return barber?.name || 'Barbero';
+  };
+
   return (
     <div className="mt-6 bg-white rounded-lg shadow-lg p-6">
       <h3 className="text-xl font-semibold mb-4">Detalles de la cita</h3>
-      <div className="mb-4">
+      <div className="mb-4 space-y-2">
         <div className="flex items-center gap-2 text-gray-600">
           <CalendarIcon className="w-5 h-5" />
           {format(selectedDate, "EEEE, d 'de' MMMM 'de' yyyy", { locale: es })}
@@ -117,7 +133,14 @@ const BookingForm: React.FC<BookingFormProps> = ({
           <ClockIcon className="w-5 h-5" />
           {selectedTime}
         </div>
+        {selectedBarberId && (
+          <div className="flex items-center gap-2 text-gray-600">
+            <User className="w-5 h-5" />
+            {getBarberName(selectedBarberId)}
+          </div>
+        )}
       </div>
+      
       <form onSubmit={handleSubmit}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
@@ -137,6 +160,33 @@ const BookingForm: React.FC<BookingFormProps> = ({
               ))}
             </select>
           </div>
+
+          {adminSettings.multiple_barbers_enabled && !selectedBarberId && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Selecciona el barbero
+              </label>
+              <select
+                name="barber_id"
+                value={formData.barber_id}
+                onChange={handleChange}
+                className={`block w-full p-2 border ${
+                  errors.barber_id ? 'border-red-500' : 'border-gray-300'
+                } rounded-md shadow-sm focus:ring-red-500 focus:border-red-500`}
+              >
+                <option value="">Seleccionar barbero</option>
+                {barbers.map(barber => (
+                  <option key={barber.id} value={barber.id}>
+                    {barber.name}
+                  </option>
+                ))}
+              </select>
+              {errors.barber_id && (
+                <p className="mt-1 text-sm text-red-600">{errors.barber_id}</p>
+              )}
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Nombre completo
@@ -155,6 +205,7 @@ const BookingForm: React.FC<BookingFormProps> = ({
               <p className="mt-1 text-sm text-red-600">{errors.clientName}</p>
             )}
           </div>
+          
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               <div className="flex items-center">
@@ -177,12 +228,14 @@ const BookingForm: React.FC<BookingFormProps> = ({
             )}
           </div>
         </div>
+        
         <div className="mt-6 flex items-center">
           <MessageSquare className="h-5 w-5 text-green-600 mr-2" />
           <p className="text-sm text-gray-600">
             Se notificará automáticamente al barbero por WhatsApp después de reservar.
           </p>
         </div>
+        
         <div className="mt-6">
           <button
             type="submit"
