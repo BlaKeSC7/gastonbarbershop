@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
-import { services } from '../utils/mockData';
+// import { services as mockServices } from '../utils/mockData'; // No longer use mockServices directly for display
 import { useAppointments } from '../context/AppointmentContext';
 import { Phone, MessageSquare, Calendar as CalendarIcon, Clock as ClockIcon, User } from 'lucide-react';
 import { es } from 'date-fns/locale';
@@ -19,14 +19,24 @@ const BookingForm: React.FC<BookingFormProps> = ({
   selectedBarberId,
   onSuccess
 }) => {
-  const { createAppointment, barbers, adminSettings } = useAppointments();
+  const { createAppointment, barbers, adminSettings, services } = useAppointments(); // Get services from context
   const [formData, setFormData] = useState({
     clientName: '',
     clientPhone: '',
-    service: services[0]?.id || '',
+    service: '', // Initialize service as empty or handle loading state
     barber_id: selectedBarberId || adminSettings.default_barber_id || ''
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    // Set default service when services are loaded from context
+    if (services && services.length > 0 && !formData.service) {
+      setFormData(prev => ({
+        ...prev,
+        service: services[0].id
+      }));
+    }
+  }, [services, formData.service]);
 
   const formatPhoneNumber = (value: string) => {
     const numbers = value.replace(/\D/g, '');
@@ -71,27 +81,68 @@ const BookingForm: React.FC<BookingFormProps> = ({
     } else if (!/^\d{3}-\d{3}-\d{4}$/.test(formData.clientPhone)) {
       newErrors.clientPhone = 'Formato: 555-123-4567';
     }
-    if (adminSettings.multiple_barbers_enabled && !formData.barber_id) {
+    console.log('[ValidateForm] adminSettings.multiple_barbers_enabled:', adminSettings.multiple_barbers_enabled);
+    console.log('[ValidateForm] formData.barber_id:', formData.barber_id);
+    console.log('[ValidateForm] !formData.barber_id:', !formData.barber_id);
+
+    let isBarberIdMissing = false;
+    if (adminSettings.multiple_barbers_enabled) {
+      // Considera faltante si es null, undefined, o un string vacío.
+      // Un número (como 1) no se consideraría faltante por esta lógica específica de "missing".
+      // El backend luego validará si '1' es un ID de barbero válido.
+      if (formData.barber_id == null || formData.barber_id === '') { // Usar == null para cubrir undefined y null, y === '' para string vacío
+        isBarberIdMissing = true;
+      } else if (typeof formData.barber_id === 'string' && formData.barber_id.trim() === '') {
+        // Cubre el caso de un string que solo contiene espacios
+        isBarberIdMissing = true;
+      }
+      // Si formData.barber_id es un número (ej. 1), o un string no vacío (ej. "uuid-string"), isBarberIdMissing será false.
+    }
+
+    if (isBarberIdMissing) {
       newErrors.barber_id = 'Debe seleccionar un barbero';
     }
+
     setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    const isValid = Object.keys(newErrors).length === 0;
+    console.log('[ValidateForm] newErrors:', newErrors, 'isValid:', isValid);
+    return isValid;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validateForm()) return;
+    const formIsValid = validateForm();
+    console.log('[HandleSubmit] formIsValid:', formIsValid);
+    if (!formIsValid) return;
+
     try {
-      const cleanPhone = formData.clientPhone.replace(/\D/g, '');
-      
+      let processedPhone = formData.clientPhone.replace(/\D/g, ''); // 1. Limpiar para obtener solo dígitos
+
+      if (processedPhone.length === 10) {
+        // 2. Si tiene 10 dígitos (ej. 8091234567), se asume que es de la región +1 y se antepone "+1".
+        processedPhone = `+1${processedPhone}`;
+      } else if (processedPhone.length === 11 && processedPhone.startsWith('1')) {
+        // 3. Si tiene 11 dígitos y empieza con "1" (ej. 18091234567),
+        //    se reemplaza el "1" inicial con "+" (quedando "+1809...").
+        processedPhone = `+${processedPhone}`;
+      }
+      // Números con otros formatos o que ya contengan un '+' (y sobrevivieron parcialmente al replace)
+      // se guardarán como queden. Ej: si alguien pone "+52..." y el replace quita el '+',
+      // esta lógica no lo re-añadirá ni antepondrá +1. Se guardará "52...".
+      // Si se quiere ser más estricto o manejar más casos, esta lógica se puede expandir.
+
       // Usar el barbero seleccionado o el por defecto
       const finalBarberId = selectedBarberId || formData.barber_id || adminSettings.default_barber_id;
+      console.log('[HandleSubmit] finalBarberId for createAppointment:', finalBarberId,
+                  'selectedBarberId:', selectedBarberId,
+                  'formData.barber_id:', formData.barber_id,
+                  'adminSettings.default_barber_id:', adminSettings.default_barber_id);
       
       await createAppointment({
         date: selectedDate,
         time: selectedTime,
         clientName: formData.clientName.trim(),
-        clientPhone: cleanPhone,
+        clientPhone: processedPhone, // Usar el número procesado
         service: formData.service,
         barber_id: finalBarberId, // Asegurar que se use el barbero correcto
         confirmed: true

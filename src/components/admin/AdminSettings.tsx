@@ -42,8 +42,9 @@ const AdminSettings: React.FC = () => {
   const [hoursSettings, setHoursSettings] = useState<any[]>([]);
 
   // Estados para barberos
-  const [newBarber, setNewBarber] = useState({ name: '', phone: '' });
+  const [newBarber, setNewBarber] = useState({ name: '', phone: '', access_key: '' });
   const [editingBarber, setEditingBarber] = useState<string | null>(null);
+  const [editingBarberData, setEditingBarberData] = useState({ id: null as string | null, name: '', phone: '', access_key: '' });
 
   // Todas las horas disponibles para seleccionar
   const allAvailableHours = [
@@ -127,8 +128,8 @@ const AdminSettings: React.FC = () => {
   };
 
   const handleCreateBarber = async () => {
-    if (!newBarber.name.trim() || !newBarber.phone.trim()) {
-      toast.error('Por favor completa todos los campos');
+    if (!newBarber.name.trim() || !newBarber.phone.trim() || !newBarber.access_key.trim()) {
+      toast.error('Por favor completa todos los campos, incluyendo la clave de acceso.');
       return;
     }
 
@@ -136,9 +137,10 @@ const AdminSettings: React.FC = () => {
       await createBarber({
         name: newBarber.name.trim(),
         phone: newBarber.phone.trim(),
+        access_key: newBarber.access_key.trim(),
         is_active: true
       });
-      setNewBarber({ name: '', phone: '' });
+      setNewBarber({ name: '', phone: '', access_key: '' });
     } catch (error) {
       console.error('Error creando barbero:', error);
     }
@@ -154,11 +156,23 @@ const AdminSettings: React.FC = () => {
   };
 
   const handleDeleteBarber = async (id: string) => {
-    if (window.confirm('¿Estás seguro de que deseas desactivar este barbero?')) {
+    // Check if the barber to be deleted is the default barber
+    if (adminSettings.default_barber_id === id) {
+      toast.error('Este barbero está configurado como el barbero por defecto. Por favor, selecciona un barbero por defecto diferente antes de eliminar este.');
+      return;
+    }
+
+    if (window.confirm('¿Estás seguro de que deseas eliminar este barbero? Esta acción es irreversible y también eliminará sus horarios específicos.')) {
       try {
         await deleteBarber(id);
+        // Optionally, if the deleted barber was the one being edited, clear the edit form
+        if (editingBarber === id) {
+          setEditingBarber(null);
+          setEditingBarberData({ id: null, name: '', phone: '', access_key: '' });
+        }
       } catch (error) {
         console.error('Error eliminando barbero:', error);
+        // Error toast is already handled in deleteBarber context function
       }
     }
   };
@@ -424,24 +438,25 @@ const AdminSettings: React.FC = () => {
                     </div>
 
                     {dayHours.is_open && (
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4"> {/* Responsive grid */}
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">
                             Mañana
                           </label>
-                          <div className="flex space-x-2">
+                          {/* Responsive flex container for time inputs */}
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-2 space-y-2 sm:space-y-0">
                             <input
                               type="time"
                               value={dayHours.morning_start || '07:00'}
                               onChange={(e) => handleHoursChange(index, 'morning_start', e.target.value)}
-                              className="block w-full p-2 border border-gray-300 rounded-md text-sm"
+                              className="block w-full sm:w-auto flex-1 p-2 border border-gray-300 rounded-md text-sm" // Responsive width and flex
                             />
-                            <span className="self-center text-gray-500">a</span>
+                            <span className="self-center text-gray-500 px-1 text-center sm:text-left">a</span> {/* Adjusted span */}
                             <input
                               type="time"
                               value={dayHours.morning_end || '12:00'}
                               onChange={(e) => handleHoursChange(index, 'morning_end', e.target.value)}
-                              className="block w-full p-2 border border-gray-300 rounded-md text-sm"
+                              className="block w-full sm:w-auto flex-1 p-2 border border-gray-300 rounded-md text-sm" // Responsive width and flex
                             />
                           </div>
                         </div>
@@ -450,19 +465,20 @@ const AdminSettings: React.FC = () => {
                           <label className="block text-sm font-medium text-gray-700 mb-1">
                             Tarde
                           </label>
-                          <div className="flex space-x-2">
+                          {/* Responsive flex container for time inputs */}
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-2 space-y-2 sm:space-y-0">
                             <input
                               type="time"
                               value={dayHours.afternoon_start || '15:00'}
                               onChange={(e) => handleHoursChange(index, 'afternoon_start', e.target.value)}
-                              className="block w-full p-2 border border-gray-300 rounded-md text-sm"
+                              className="block w-full sm:w-auto flex-1 p-2 border border-gray-300 rounded-md text-sm" // Responsive width and flex
                             />
-                            <span className="self-center text-gray-500">a</span>
+                            <span className="self-center text-gray-500 px-1 text-center sm:text-left">a</span> {/* Adjusted span */}
                             <input
                               type="time"
                               value={dayHours.afternoon_end || '21:00'}
                               onChange={(e) => handleHoursChange(index, 'afternoon_end', e.target.value)}
-                              className="block w-full p-2 border border-gray-300 rounded-md text-sm"
+                              className="block w-full sm:w-auto flex-1 p-2 border border-gray-300 rounded-md text-sm" // Responsive width and flex
                             />
                           </div>
                         </div>
@@ -498,7 +514,8 @@ const AdminSettings: React.FC = () => {
           {/* Agregar nuevo barbero */}
           <div className="border border-gray-200 rounded-lg p-4">
             <h3 className="text-lg font-medium mb-4">Agregar Nuevo Barbero</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Adjusted grid to md:grid-cols-4 to accommodate the new field and button */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Nombre
@@ -523,10 +540,22 @@ const AdminSettings: React.FC = () => {
                   placeholder="+1234567890"
                 />
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Clave de Acceso (para ver sus citas)
+                </label>
+                <input
+                  type="text"
+                  value={newBarber.access_key}
+                  onChange={(e) => setNewBarber({ ...newBarber, access_key: e.target.value })}
+                  className="block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-red-500 focus:border-red-500"
+                  placeholder="Clave secreta"
+                />
+              </div>
               <div className="flex items-end">
                 <button
                   onClick={handleCreateBarber}
-                  className="flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+                  className="flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 w-full md:w-auto justify-center"
                 >
                   <Plus className="h-4 w-4 mr-2" />
                   Agregar
@@ -548,15 +577,35 @@ const AdminSettings: React.FC = () => {
                       <Users className="h-5 w-5 text-blue-500" />
                       <div>
                         <p className="font-medium text-gray-900">{barber.name}</p>
+                        <p className="font-medium text-gray-900">{barber.name}</p>
                         <p className="text-sm text-gray-500 flex items-center">
                           <Phone className="h-3 w-3 mr-1" />
                           {barber.phone}
                         </p>
+                        {/* Displaying access key here is a security risk if not handled carefully.
+                            Typically, admin might see it or it's only set/reset.
+                            For now, we are not displaying it directly in the list.
+                            It should be editable in the editing form.
+                        */}
+                        {/* <p className="text-xs text-gray-400">Key: {barber.access_key || 'N/A'}</p> */}
                       </div>
                     </div>
                     <div className="flex items-center space-x-2">
                       <button
-                        onClick={() => setEditingBarber(barber.id)}
+                        onClick={() => {
+                          // When editing, you would typically fetch the full barber details
+                          // including the access_key to populate the editing form.
+                          const currentBarber = barbers.find(b => b.id === barber.id);
+                          if (currentBarber) {
+                            setEditingBarber(currentBarber.id);
+                            setEditingBarberData({
+                              id: currentBarber.id,
+                              name: currentBarber.name,
+                              phone: currentBarber.phone || '',
+                              access_key: currentBarber.access_key || '' // Use empty string if null/undefined for form
+                            });
+                          }
+                        }}
                         className="text-blue-600 hover:text-blue-800"
                         title="Editar barbero"
                       >
@@ -565,7 +614,7 @@ const AdminSettings: React.FC = () => {
                       <button
                         onClick={() => handleDeleteBarber(barber.id)}
                         className="text-red-600 hover:text-red-800"
-                        title="Desactivar barbero"
+                        title="Eliminar barbero" // Changed title
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -575,6 +624,91 @@ const AdminSettings: React.FC = () => {
               </div>
             )}
           </div>
+
+          {/* Barber Editing Modal/Form */}
+          {editingBarber && editingBarberData.id && (
+            <div className="fixed inset-0 bg-gray-600 bg-opacity-75 overflow-y-auto h-full w-full z-50 flex items-center justify-center">
+              <div className="relative mx-auto p-6 border w-full max-w-md shadow-lg rounded-md bg-white">
+                <h3 className="text-xl font-semibold leading-6 text-gray-900 mb-6">
+                  Editar Barbero: {editingBarberData.name}
+                </h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Nombre
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Nombre del barbero"
+                      value={editingBarberData.name}
+                      onChange={(e) => setEditingBarberData({ ...editingBarberData, name: e.target.value })}
+                      className="block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-red-500 focus:border-red-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Teléfono WhatsApp
+                    </label>
+                    <input
+                      type="tel"
+                      placeholder="+1234567890"
+                      value={editingBarberData.phone}
+                      onChange={(e) => setEditingBarberData({ ...editingBarberData, phone: e.target.value })}
+                      className="block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-red-500 focus:border-red-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Nueva Clave de Acceso
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Dejar vacío para no cambiar clave"
+                      value={editingBarberData.access_key || ''} // Ensure it's controlled, use empty string for null
+                      onChange={(e) => setEditingBarberData({ ...editingBarberData, access_key: e.target.value })}
+                      className="block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-red-500 focus:border-red-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Si dejas este campo vacío, la clave de acceso actual no se modificará.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex justify-end space-x-3 mt-8">
+                  <button
+                    onClick={() => {
+                      setEditingBarber(null);
+                      setEditingBarberData({ id: null, name: '', phone: '', access_key: '' }); // Reset data
+                    }}
+                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (!editingBarberData.id) return; // Should not happen if modal is visible
+
+                      const updates: { name: string; phone: string; access_key?: string } = {
+                        name: editingBarberData.name.trim(),
+                        phone: editingBarberData.phone.trim(),
+                      };
+
+                      if (editingBarberData.access_key && editingBarberData.access_key.trim() !== '') {
+                        updates.access_key = editingBarberData.access_key.trim();
+                      }
+                      // If access_key is empty, we don't include it in `updates`, so it won't be changed.
+
+                      handleUpdateBarber(editingBarberData.id, updates);
+                      setEditingBarberData({ id: null, name: '', phone: '', access_key: '' }); // Reset after save
+                    }}
+                    className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
+                  >
+                    <Save className="h-4 w-4 inline mr-2" />
+                    Guardar Cambios
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

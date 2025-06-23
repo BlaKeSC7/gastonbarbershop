@@ -15,7 +15,7 @@ import {
 import { format, startOfMonth, endOfMonth, subMonths, addMonths, isWithinInterval } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useAppointments } from '../../context/AppointmentContext';
-import { services } from '../../utils/mockData';
+// import { services } from '../../utils/mockData'; // Removed mock data import
 import { isSameDate, isDateBefore, isFutureDate } from '../../utils/dateUtils';
 
 interface MonthlyStats {
@@ -38,9 +38,11 @@ interface HourStats {
 }
 
 const StatisticsPanel: React.FC = () => {
-  const { appointments, barbers, adminSettings } = useAppointments();
+  const { appointments, barbers, adminSettings, services } = useAppointments(); // Added services from context
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [selectedBarberId, setSelectedBarberId] = useState<string | null>(null);
+
+  console.log('[StatisticsPanel] Services from context:', services); // Log services from context
   const [monthlyStats, setMonthlyStats] = useState<MonthlyStats[]>([]);
   const [serviceStats, setServiceStats] = useState<ServiceStats[]>([]);
   const [hourStats, setHourStats] = useState<HourStats[]>([]);
@@ -60,8 +62,21 @@ const StatisticsPanel: React.FC = () => {
   const getFilteredAppointments = () => {
     let filtered = appointments.filter(app => !app.cancelled);
     
-    if (selectedBarberId) {
-      filtered = filtered.filter(app => app.barber_id === selectedBarberId);
+    if (selectedBarberId) { // selectedBarberId es un string o null
+      const barberIdAsNumber = parseInt(selectedBarberId, 10);
+
+      console.log(`Filtering for barber ID (original string: "${selectedBarberId}", as number: ${barberIdAsNumber}). Appointments before filter: ${filtered.length}`);
+
+      const barberAppointments = filtered.filter(app => {
+        // console.log(`Comparing app.barber_id (${app.barber_id}, type: ${typeof app.barber_id}) with barberIdAsNumber (${barberIdAsNumber}, type: ${typeof barberIdAsNumber})`);
+        return app.barber_id === barberIdAsNumber;
+      });
+
+      console.log(`Appointments after filter for barber ${barberIdAsNumber}: ${barberAppointments.length}`);
+      // console.log(barberAppointments.map(a => ({ id: a.id, barber_id: a.barber_id, date: a.date, service: a.service }))); // Descomentar para ver las citas filtradas
+      filtered = barberAppointments;
+    } else {
+      console.log(`No barber selected, using all non-cancelled appointments: ${filtered.length}`);
     }
     
     return filtered;
@@ -69,6 +84,7 @@ const StatisticsPanel: React.FC = () => {
 
   const calculateStatistics = () => {
     const activeAppointments = getFilteredAppointments();
+    console.log('[StatisticsPanel] Active appointments for stats:', activeAppointments);
 
     // Estadísticas de los últimos 6 meses
     const last6Months = Array.from({ length: 6 }, (_, i) => {
@@ -83,6 +99,7 @@ const StatisticsPanel: React.FC = () => {
       
       const revenue = monthAppointments.reduce((total, app) => {
         const service = services.find(s => s.id === app.service);
+        // console.log(`[Stats - 6m Revenue] App service ID: ${app.service}, Found service: ${JSON.stringify(service)}, Price: ${service?.price}`);
         return total + (service?.price || 0);
       }, 0);
 
@@ -109,6 +126,7 @@ const StatisticsPanel: React.FC = () => {
     
     currentMonthAppointments.forEach(app => {
       const service = services.find(s => s.id === app.service);
+      // console.log(`[Stats - ServiceCount] App service ID: ${app.service}, Found service: ${JSON.stringify(service)}`);
       if (service) {
         serviceCount.set(service.name, (serviceCount.get(service.name) || 0) + 1);
         serviceRevenue.set(service.name, (serviceRevenue.get(service.name) || 0) + service.price);
@@ -141,6 +159,7 @@ const StatisticsPanel: React.FC = () => {
     // Estadísticas generales del mes actual
     const totalRevenue = currentMonthAppointments.reduce((total, app) => {
       const service = services.find(s => s.id === app.service);
+      // console.log(`[Stats - MonthRevenue] App service ID: ${app.service}, Found service: ${JSON.stringify(service)}, Price: ${service?.price}`);
       return total + (service?.price || 0);
     }, 0);
 

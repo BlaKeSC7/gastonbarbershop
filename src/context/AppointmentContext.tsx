@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback } from 'react';
-import { Appointment, Holiday, BlockedTime, Barber, BusinessHours, BarberSchedule, AdminSettings, Review, CreateReviewData } from '../types';
+import { Appointment, Holiday, BlockedTime, Barber, BusinessHours, BarberSchedule, AdminSettings, Review, CreateReviewData, Service } from '../types';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { notifyAppointmentCreated, notifyAppointmentCancelled } from '../services/whatsappService';
@@ -15,6 +15,7 @@ interface AppointmentContextType {
   barberSchedules: BarberSchedule[];
   adminSettings: AdminSettings;
   reviews: Review[];
+  services: Service[]; // Added services
   userPhone: string | null;
   setUserPhone: (phone: string) => void;
   cancelAppointment: (id: string) => Promise<void>;
@@ -46,6 +47,11 @@ interface AppointmentContextType {
   deleteReview: (id: string) => Promise<void>;
   getApprovedReviews: () => Review[];
   getAverageRating: () => number;
+  // Barber Access Key Auth
+  loggedInBarber: Barber | null;
+  verifyBarberAccessKey: (accessKey: string) => Promise<Barber | null>;
+  logoutBarber: () => void;
+  getAppointmentsForBarber: (barberId: string) => Appointment[];
 }
 
 // Genera un rango de horas en formato HH:00
@@ -114,6 +120,7 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
   const [businessHours, setBusinessHours] = useState<BusinessHours[]>([]);
   const [barberSchedules, setBarberSchedules] = useState<BarberSchedule[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
+  const [services, setServices] = useState<Service[]>([]); // Added services state
   const [adminSettings, setAdminSettings] = useState<AdminSettings>({
     id: '',
     early_booking_restriction: false,
@@ -125,6 +132,7 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
     updated_at: ''
   });
   const [userPhone, setUserPhone] = useState<string | null>(() => localStorage.getItem('userPhone'));
+  const [loggedInBarber, setLoggedInBarber] = useState<Barber | null>(null);
 
   // Función para cargar configuración de admin
   const loadAdminSettings = async () => {
@@ -256,7 +264,7 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
     try {
       const { data, error } = await supabase
         .from('holidays')
-        .select('*')
+        .select('*, barber_id') // Ensure barber_id is selected
         .order('date', { ascending: true });
       if (error) throw error;
       const formattedHolidays = data.map(holiday => ({
@@ -273,7 +281,7 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
     try {
       const { data, error } = await supabase
         .from('blocked_times')
-        .select('*')
+        .select('*, barber_id') // Ensure barber_id is selected
         .order('date', { ascending: true });
       if (error) throw error;
       const formattedBlockedTimes = data.map(blockedTime => ({
@@ -342,6 +350,20 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
     }
   };
 
+  const fetchServices = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('services')
+        .select('*')
+        .order('name', { ascending: true });
+      if (error) throw error;
+      setServices(data || []);
+    } catch (error) {
+      console.error('Error fetching services:', error);
+      toast.error('Error al cargar los servicios');
+    }
+  };
+
   useEffect(() => {
     const initializeData = async () => {
       await loadAdminSettings();
@@ -352,7 +374,8 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
         fetchBarbers(),
         fetchBusinessHours(),
         fetchBarberSchedules(),
-        fetchReviews()
+        fetchReviews(),
+        fetchServices() // Added fetchServices
       ]);
     };
     
@@ -367,26 +390,92 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
       }
 
       const formattedDate = formatDateForSupabase(date);
+
+      // Parse barberId (string from UI or undefined) to a number or null for internal logic
+      let queryBarberIdAsNumber: number | null = null;
+      if (barberId && typeof barberId === 'string') {
+        const parsed = parseInt(barberId, 10);
+        if (!isNaN(parsed)) {
+          queryBarberIdAsNumber = parsed;
+        }
+      } else if (typeof barberId === 'number') { // Should not happen if barberId comes from select value, but good for robustness
+        queryBarberIdAsNumber = barberId;
+      }
+      // console.log(`[LOG isTimeSlotAvailable] Initial Query: Date: ${formattedDate}, Time: ${time}, Original barberId: "${barberId}", Parsed queryBarberIdAsNumber: ${queryBarberIdAsNumber}`);
       
-      // Verificar feriados
-      const { data: holidaysData } = await supabase
+      // Verify holidays considering barber_id
+      let holidayQueryBuilder = supabase
         .from('holidays')
-        .select('id')
+        .select('id, barber_id')
         .eq('date', formattedDate);
-      
-      if (holidaysData && holidaysData.length > 0) return false;
+
+      const { data: holidaysOnDate, error: holidaysError } = await holidayQueryBuilder;
+
+      if (holidaysError) {
+        console.error("Error fetching holidays in isTimeSlotAvailable:", holidaysError);
+        return false; // Fail safe, assume unavailable if error
+      }
+
+      if (holidaysOnDate && holidaysOnDate.length > 0) {
+        const isGeneralHoliday = holidaysOnDate.some(h => h.barber_id === null);
+        if (isGeneralHoliday) {
+          return false; // General holiday makes it unavailable for everyone
+        }
+        if (barberId) {
+          const isBarberSpecificHoliday = holidaysOnDate.some(h => h.barber_id === barberId);
+          if (isBarberSpecificHoliday) {
+            return false; // Specific holiday for this barber
+          }
+        }
+      }
       
       // Verificar horarios bloqueados
-      const { data: blockedData } = await supabase
+      const { data: blockedData, error: blockedError } = await supabase
         .from('blocked_times')
-        .select('time,timeSlots')
+        .select('time, timeSlots, barber_id') // Fetch barber_id
         .eq('date', formattedDate);
+
+      if (blockedError) {
+        console.error("Error fetching blocked times in isTimeSlotAvailable:", blockedError);
+        return false; // Fail safe
+      }
       
-      if (blockedData && blockedData.some(block =>
-        (block.time && block.time === time) ||
-        (block.timeSlots && Array.isArray(block.timeSlots) && block.timeSlots.includes(time))
-      )) return false;
+      if (blockedData && blockedData.some(block => {
+        const isSlotMatch = (block.time && block.time === time) ||
+                           (block.timeSlots && Array.isArray(block.timeSlots) && block.timeSlots.includes(time));
+        if (!isSlotMatch) return false; // This specific block doesn't match the time slot.
+
+        let queryBarberIdAsNumber: number | null = null;
+        if (barberId && typeof barberId === 'string') {
+          const parsed = parseInt(barberId, 10);
+          if (!isNaN(parsed)) {
+            queryBarberIdAsNumber = parsed;
+          }
+        } else if (typeof barberId === 'number') { // Should not happen if barberId comes from select value, but good for robustness
+          queryBarberIdAsNumber = barberId;
+        }
+
+
+        console.log(`[LOG isTimeSlotAvailable] Date: ${formattedDate}, Time: ${time}, Querying for barberId (string): "${barberId}", ParsedAsNumber: ${queryBarberIdAsNumber}, Current Block: ${JSON.stringify(block)}`);
+
+        // Correct logic: callback returns true if THIS block makes the slot unavailable for the query.
+        if (block.barber_id === null) {
+          console.log(`[LOG isTimeSlotAvailable] -> General block applies.`);
+          return true; // General block applies
+        }
+        if (queryBarberIdAsNumber !== null && block.barber_id === queryBarberIdAsNumber) {
+          console.log(`[LOG isTimeSlotAvailable] -> Specific block for barber ${queryBarberIdAsNumber} applies.`);
+          return true; // Specific block for the queried barber applies
+        }
+        console.log(`[LOG isTimeSlotAvailable] -> Block for barber ${block.barber_id} does not apply to query for ${queryBarberIdAsNumber}.`);
+        return false; // Specific block for a different barber, or general query for a specific block (doesn't make slot unavailable for this rule)
+      })) {
+        console.log(`[LOG isTimeSlotAvailable] Slot ${time} on ${formattedDate} for barber ${queryBarberIdAsNumber} (parsed from "${barberId}") is BLOCKED due to a matching 'blocked_time'.`);
+        return false; // Slot NO disponible debido a un bloqueo aplicable
+      }
       
+      // console.log(`[LOG isTimeSlotAvailable] Slot ${time} on ${formattedDate} for barber ${queryBarberIdAsNumber} (parsed from "${barberId}") is NOT blocked by 'blocked_times'. Checking appointments...`);
+
       // Verificar citas existentes
       let appointmentQuery = supabase
         .from('appointments')
@@ -395,46 +484,110 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
         .eq('time', time)
         .eq('cancelled', false);
       
-      if (barberId) {
-        appointmentQuery = appointmentQuery.eq('barber_id', barberId);
+      // Asegurarse de que queryBarberIdAsNumber se use aquí también para consistencia si es una consulta específica.
+      if (queryBarberIdAsNumber !== null) {
+        appointmentQuery = appointmentQuery.eq('barber_id', queryBarberIdAsNumber);
+      }
+      // Si queryBarberIdAsNumber es null (consulta general), no se filtra por barber_id en citas,
+      // lo que significa que si CUALQUIER barbero tiene cita, bloquea el slot general. Esto es usualmente correcto.
+      
+      const { data: appointmentsData, error: appointmentError } = await appointmentQuery;
+
+      if (appointmentError) {
+        console.error("Error fetching appointments in isTimeSlotAvailable:", appointmentError);
+        return false; // Fail safe, assume unavailable if error fetching appointments
       }
       
-      const { data: appointmentsData } = await appointmentQuery;
+      if (appointmentsData && appointmentsData.length > 0) {
+        console.log(`[LOG isTimeSlotAvailable] Slot ${time} on ${formattedDate} for barber ${queryBarberIdAsNumber} (parsed from "${barberId}") is BLOCKED due to an existing appointment.`);
+        return false; // Slot NO disponible debido a una cita existente
+      }
       
-      if (appointmentsData && appointmentsData.length > 0) return false;
-      
-      return true;
+      console.log(`[LOG isTimeSlotAvailable] Slot ${time} on ${formattedDate} for barber ${queryBarberIdAsNumber} (parsed from "${barberId}") is AVAILABLE.`);
+      return true; // Si pasó todos los chequeos, el slot SÍ está disponible
     } catch (err) {
-      return false;
+      console.error(`[LOG isTimeSlotAvailable] Error in isTimeSlotAvailable for date ${date}, time ${time}, barberId ${barberId}:`, err);
+      return false; // Fail safe
     }
-  }, [adminSettings]);
+  }, [adminSettings]); // adminSettings es dependencia porque se usa en isRestrictedHourWithAdvance
 
   const getDayAvailability = useCallback(async (date: Date, barberId?: string) => {
     const formattedDate = formatDateForSupabase(date);
-    const hours = getAvailableHoursForDate(date, barberId);
+    const hours = getAvailableHoursForDate(date, barberId); // barberId aquí es el string original o undefined
     if (hours.length === 0) return {};
 
-    const [{ data: holidaysData }, { data: blockedData }, { data: appointmentsData }] = await Promise.all([
-      supabase.from('holidays').select('id').eq('date', formattedDate),
-      supabase.from('blocked_times').select('time,timeSlots').eq('date', formattedDate),
-      barberId 
-        ? supabase.from('appointments').select('time').eq('date', formattedDate).eq('barber_id', barberId).eq('cancelled', false)
-        : supabase.from('appointments').select('time').eq('date', formattedDate).eq('cancelled', false),
+    // Parse barberId para consultas a la DB y lógica interna
+    let queryBarberIdAsNumber: number | null = null;
+    if (barberId && typeof barberId === 'string') {
+      const parsed = parseInt(barberId, 10);
+      if (!isNaN(parsed)) {
+        queryBarberIdAsNumber = parsed;
+      }
+    } else if (typeof barberId === 'number') {
+      queryBarberIdAsNumber = barberId;
+    }
+
+    console.log(`[LOG getDayAvailability] Date: ${formattedDate}, Querying for barberId (string): "${barberId}", ParsedAsNumber: ${queryBarberIdAsNumber}`);
+
+    // Fetch all potentially relevant data in parallel
+    const [holidaysResult, blockedResult, appointmentsResult] = await Promise.allSettled([
+      supabase.from('holidays').select('id, barber_id').eq('date', formattedDate),
+      supabase.from('blocked_times').select('time, timeSlots, barber_id').eq('date', formattedDate),
+      queryBarberIdAsNumber !== null
+        ? supabase.from('appointments').select('time').eq('date', formattedDate).eq('barber_id', queryBarberIdAsNumber).eq('cancelled', false)
+        : supabase.from('appointments').select('time').eq('date', formattedDate).eq('cancelled', false)
     ]);
 
+    // Handle results and errors
+    const holidaysData = holidaysResult.status === 'fulfilled' ? holidaysResult.value.data : null;
+    if (holidaysResult.status === 'rejected') console.error("Error fetching holidays in getDayAvailability:", holidaysResult.reason);
+
+    const blockedData = blockedResult.status === 'fulfilled' ? blockedResult.value.data : null;
+    if (blockedResult.status === 'rejected') console.error("Error fetching blocked_times in getDayAvailability:", blockedResult.reason);
+    console.log(`[LOG getDayAvailability] All blockedData for date ${formattedDate}:`, JSON.stringify(blockedData));
+
+
+    const appointmentsData = appointmentsResult.status === 'fulfilled' ? appointmentsResult.value.data : null;
+    if (appointmentsResult.status === 'rejected') console.error("Error fetching appointments in getDayAvailability:", appointmentsResult.reason);
+
+
     const availability: { [hour: string]: boolean } = {};
+
+    // Process holidays
+    let activeHolidaysForContext = false;
     if (holidaysData && holidaysData.length > 0) {
+      const isGeneralHoliday = holidaysData.some(h => h.barber_id === null);
+      if (isGeneralHoliday) {
+        activeHolidaysForContext = true;
+      } else if (queryBarberIdAsNumber !== null) {
+        const isBarberSpecificHoliday = holidaysData.some(h => h.barber_id === queryBarberIdAsNumber);
+        if (isBarberSpecificHoliday) {
+          activeHolidaysForContext = true;
+        }
+      }
+    }
+
+    if (activeHolidaysForContext) {
+      console.log(`[LOG getDayAvailability] Date ${formattedDate} is a HOLIDAY for barber ${queryBarberIdAsNumber}. All slots unavailable.`);
       hours.forEach(h => { availability[h] = false; });
       return availability;
     }
 
+    // Process blocked times
     const blockedSlots = new Set<string>();
     if (blockedData) {
       for (const block of blockedData) {
-        if (block.timeSlots && Array.isArray(block.timeSlots)) {
-          block.timeSlots.forEach((slot: string) => blockedSlots.add(slot));
+        console.log(`[LOG getDayAvailability] Processing Block: queryForBarber=${queryBarberIdAsNumber}, blockInfo=${JSON.stringify(block)}`);
+        const isApplicableBlock = block.barber_id === null || (queryBarberIdAsNumber !== null && block.barber_id === queryBarberIdAsNumber);
+        console.log(`[LOG getDayAvailability] -> Is block applicable? ${isApplicableBlock}`);
+        if (isApplicableBlock) {
+          if (block.timeSlots && Array.isArray(block.timeSlots)) {
+            block.timeSlots.forEach((slot: string) => blockedSlots.add(slot));
+          }
+          if (block.time) {
+            blockedSlots.add(block.time);
+          }
         }
-        if (block.time) blockedSlots.add(block.time);
       }
     }
 
@@ -462,8 +615,58 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
 
       const formattedDate = formatDateForSupabase(appointmentData.date);
       
-      // Usar el barberId que viene en appointmentData, no el por defecto
-      const barberId = appointmentData.barber_id || appointmentData.barberId || adminSettings.default_barber_id;
+      let determinedBarberId = appointmentData.barber_id || appointmentData.barberId;
+
+      // Check if the determinedBarberId is a valid identifier (non-empty string or a number)
+      let isValidBarberId = (typeof determinedBarberId === 'string' && determinedBarberId.trim() !== "") ||
+                             (typeof determinedBarberId === 'number' && !isNaN(determinedBarberId));
+
+      if (!isValidBarberId) {
+        // If appointmentData didn't provide a valid ID, try the default admin setting.
+        const defaultBarberId = adminSettings.default_barber_id;
+        const isDefaultBarberIdValid = (typeof defaultBarberId === 'string' && defaultBarberId.trim() !== "") ||
+                                       (typeof defaultBarberId === 'number' && !isNaN(defaultBarberId));
+
+        if (isDefaultBarberIdValid) {
+          determinedBarberId = defaultBarberId;
+          isValidBarberId = true; // Default ID is valid
+        } else {
+          // No valid ID from appointmentData, and no valid default_barber_id either.
+          if (adminSettings.multiple_barbers_enabled) {
+            console.error("Error: No barber ID provided in appointmentData, and no valid default_barber_id is set, while multiple barbers are enabled.");
+            throw new Error('No se pudo determinar un barbero para la cita. Por favor, seleccione un barbero o configure un barbero por defecto.');
+          } else {
+            // Single barber mode, but default_barber_id is missing or invalid.
+            // Or, if not multiple_barbers_enabled, but determinedBarberId was still somehow invalid (e.g. null from a bug)
+            console.error("Error: default_barber_id is not set or is invalid, or no barberId provided in single barber mode.");
+            throw new Error('Error de configuración: El barbero por defecto no está configurado o es inválido, o no se proporcionó barbero.');
+          }
+        }
+      }
+
+      // Final check: After attempting to use appointmentData and default_barber_id,
+      // determinedBarberId must be valid.
+      if (!isValidBarberId) {
+         // This should ideally not be reached if the logic above is correct.
+        console.error("Critical Error: determinedBarberId is still not valid after all checks.");
+        throw new Error('Error crítico inesperado al determinar el barbero para la cita.');
+      }
+
+      // If determinedBarberId was a string, trim it. Numbers don't need trimming.
+      if (typeof determinedBarberId === 'string') {
+        determinedBarberId = determinedBarberId.trim();
+      }
+
+      console.log('Attempting to create appointment with data:', {
+        date: formattedDate,
+        time: appointmentData.time,
+        clientName: appointmentData.clientName,
+        clientPhone: appointmentData.clientPhone,
+        service: appointmentData.service,
+        confirmed: appointmentData.confirmed,
+        barber_id: determinedBarberId, // Log the actual value being sent
+        cancelled: false
+      });
       
       const { data: newAppointment, error } = await supabase
         .from('appointments')
@@ -474,7 +677,7 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
           clientPhone: appointmentData.clientPhone,
           service: appointmentData.service,
           confirmed: appointmentData.confirmed,
-          barber_id: barberId,
+          barber_id: determinedBarberId,
           cancelled: false
         }])
         .select(`
@@ -482,11 +685,14 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
           barber:barbers(id, name, phone)
         `)
         .single();
-      if (error) throw new Error('Error al crear la cita en la base de datos');
+      if (error) {
+        console.error('Supabase error creating appointment:', error); // Log the full Supabase error
+        throw new Error(`Error al crear la cita en la base de datos: ${error.message}`); // Include Supabase message
+      }
       
       try {
         // Obtener el barbero para la notificación
-        const barber = barbers.find(b => b.id === barberId) || newAppointment.barber;
+        const barber = barbers.find(b => b.id === determinedBarberId) || newAppointment.barber;
         const barberPhone = barber?.phone || '+18092033894';
         
         // Enviar notificaciones por WhatsApp Web
@@ -539,22 +745,24 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
       ));
       
       try {
-        // Obtener el barbero para la notificación
+        // Notificación al CLIENTE cuando el negocio/barbero cancela
         const barber = barbers.find(b => b.id === appointmentToCancel.barber_id);
-        const barberPhone = barber?.phone || '+18092033894';
         
-        // Enviar notificaciones de cancelación por WhatsApp Web
         await notifyAppointmentCancelled({
-          clientPhone: appointmentToCancel.clientPhone,
+          recipientPhone: appointmentToCancel.clientPhone, // Enviar al cliente
           clientName: appointmentToCancel.clientName,
+          clientPhone: appointmentToCancel.clientPhone, // Aún necesario para contexto del mensaje si se reutiliza la interfaz
           date: format(appointmentToCancel.date, 'dd/MM/yyyy'),
           time: appointmentToCancel.time,
           service: appointmentToCancel.service,
-          barberName: barber?.name || 'Barbero',
-          barberPhone
+          barberName: barber?.name || 'la Barbería', // Nombre del barbero o genérico
+          cancellationInitiator: 'business', // Cancelación iniciada por el negocio
+          // businessName: "D' Gastón Stylo Barbería" // Opcional, si se quiere pasar explícitamente
         });
       } catch (whatsappError) {
-        console.error('Error enviando WhatsApp de cancelación:', whatsappError);
+        console.error('Error enviando WhatsApp de notificación de cancelación al cliente:', whatsappError);
+        // No fallar la cancelación de la cita si la notificación de WhatsApp falla
+        toast.error('Cita cancelada, pero hubo un error al notificar al cliente por WhatsApp.');
       }
 
       toast.success('Cita cancelada exitosamente');
@@ -567,22 +775,48 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
   const createHoliday = async (holidayData: Omit<Holiday, 'id'>): Promise<Holiday> => {
     try {
       const formattedDate = formatDateForSupabase(holidayData.date);
-      const { data: existingHolidays, error: checkError } = await supabase
-        .from('holidays')
-        .select('*')
-        .eq('date', formattedDate);
-      if (checkError) throw checkError;
-      if (existingHolidays && existingHolidays.length > 0) throw new Error('Ya existe un feriado en esta fecha');
+      let existingHolidayCheckQuery = supabase.from('holidays').select('id').eq('date', formattedDate);
+
+      if (holidayData.barber_id) {
+        // Creating a barber-specific holiday
+        // Check if THIS barber already has a holiday on this date
+        existingHolidayCheckQuery = existingHolidayCheckQuery.eq('barber_id', holidayData.barber_id);
+        const { data: existingSpecificHoliday, error: checkError } = await existingHolidayCheckQuery;
+        if (checkError) throw checkError;
+        if (existingSpecificHoliday && existingSpecificHoliday.length > 0) {
+          throw new Error('Este barbero ya tiene un feriado programado en esta fecha.');
+        }
+      } else {
+        // Creating a general holiday
+        // Check if a GENERAL holiday already exists on this date
+        existingHolidayCheckQuery = existingHolidayCheckQuery.is('barber_id', null);
+        const { data: existingGeneralHoliday, error: checkError } = await existingHolidayCheckQuery;
+        if (checkError) throw checkError;
+        if (existingGeneralHoliday && existingGeneralHoliday.length > 0) {
+          throw new Error('Ya existe un feriado general programado en esta fecha.');
+        }
+      }
+
+      // Proceed to insert if no conflicting holiday found based on the new logic
+      const insertData: any = {
+        date: formattedDate,
+        description: holidayData.description,
+        barber_id: holidayData.barber_id || null // Ensure barber_id is explicitly null if not provided
+      };
+
       const { data, error } = await supabase
         .from('holidays')
-        .insert([{ ...holidayData, date: formattedDate }])
-        .select()
+        .insert([insertData]) // holidayData might contain barber_id
+        .select('*, barber_id') // Ensure barber_id is selected on return
         .single();
       if (error) throw error;
+
       const newHoliday = { ...data, date: parseSupabaseDate(data.date) };
-      setHolidays(prev => [...prev, newHoliday]);
+      setHolidays(prev => [...prev, newHoliday].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime())); // Keep sorted
+      toast.success(holidayData.barber_id ? 'Feriado específico para barbero agregado.' : 'Feriado general agregado.');
       return newHoliday;
     } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Error al crear el feriado');
       throw error;
     }
   };
@@ -599,25 +833,39 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
     }
   };
 
-  const createBlockedTime = async (blockedTimeData: Omit<BlockedTime, 'id'>): Promise<BlockedTime> => {
+  const createBlockedTime = async (blockedTimeData: Omit<BlockedTime, 'id' | 'barber_id'> & { barber_id?: string }): Promise<BlockedTime> => {
+    console.log('[createBlockedTime] Received blockedTimeData:', JSON.stringify(blockedTimeData)); // DEBUG LOG
     try {
       const formattedDate = formatDateForSupabase(blockedTimeData.date);
       const dataToInsert = {
         date: formattedDate,
         time: Array.isArray(blockedTimeData.timeSlots) ? blockedTimeData.timeSlots[0] : blockedTimeData.timeSlots,
         timeSlots: blockedTimeData.timeSlots,
-        reason: blockedTimeData.reason || 'Horario bloqueado'
+        reason: blockedTimeData.reason || 'Horario bloqueado',
+        // Ensure barber_id is a number if present, otherwise null
+        barber_id: blockedTimeData.barber_id ? Number(blockedTimeData.barber_id) : null
       };
+      console.log('[createBlockedTime] Data to insert into Supabase:', JSON.stringify(dataToInsert)); // DEBUG LOG
       const { data, error } = await supabase
         .from('blocked_times')
         .insert([dataToInsert])
-        .select()
+        .select('*, barber_id') // Ensure barber_id is selected
         .single();
       if (error) throw error;
+
       const newBlockedTime = { ...data, date: parseSupabaseDate(data.date) };
       setBlockedTimes(prev => [...prev, newBlockedTime]);
+
+      // Optional: Update toast message
+      const barberName = blockedTimeData.barber_id ? barbers.find(b => b.id === blockedTimeData.barber_id)?.name : null;
+      if (barberName) {
+        toast.success(`Horario bloqueado para ${barberName}`);
+      } else {
+        toast.success('Horario bloqueado (general)');
+      }
       return newBlockedTime;
     } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Error al crear el bloqueo de horario');
       throw error;
     }
   };
@@ -668,17 +916,42 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
   };
 
   const deleteBarber = async (id: string): Promise<void> => {
+    console.log(`[deleteBarber] Attempting to delete barber with id: ${id}`);
     try {
-      const { error } = await supabase
+      // First, delete related barber_schedules
+      console.log(`[deleteBarber] Deleting barber_schedules for barber_id: ${id}`);
+      const { error: scheduleError } = await supabase
+        .from('barber_schedules')
+        .delete()
+        .eq('barber_id', id);
+
+      if (scheduleError) {
+        console.error(`[deleteBarber] Error deleting barber schedules for barber_id: ${id}`, scheduleError);
+        throw new Error(`Error al eliminar los horarios del barbero: ${scheduleError.message}`);
+      }
+      console.log(`[deleteBarber] Successfully deleted barber_schedules for barber_id: ${id}`);
+
+      // Then, delete the barber
+      console.log(`[deleteBarber] Deleting barber from barbers table with id: ${id}`);
+      const { error: barberError } = await supabase
         .from('barbers')
-        .update({ is_active: false })
+        .delete()
         .eq('id', id);
-      if (error) throw error;
+
+      if (barberError) {
+        console.error(`[deleteBarber] Error deleting barber from barbers table with id: ${id}`, barberError);
+        throw new Error(`Error al eliminar el barbero: ${barberError.message}`);
+      }
+      console.log(`[deleteBarber] Successfully deleted barber from barbers table with id: ${id}`);
+
       setBarbers(prev => prev.filter(b => b.id !== id));
-      toast.success('Barbero desactivado exitosamente');
+      // Also update barberSchedules state locally if needed, though re-fetch might be simpler
+      setBarberSchedules(prev => prev.filter(bs => bs.barber_id !== id));
+      toast.success('Barbero y sus horarios eliminados exitosamente');
     } catch (error) {
-      toast.error('Error al desactivar barbero');
-      throw error;
+      console.error(`[deleteBarber] Catch block error for barber_id: ${id}`, error);
+      toast.error(error instanceof Error ? error.message : 'Error al eliminar barbero');
+      throw error; // Re-throw para que el llamador pueda saber que falló
     }
   };
 
@@ -796,6 +1069,60 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
     localStorage.setItem('userPhone', phone);
   };
 
+  const verifyBarberAccessKey = useCallback(async (accessKey: string): Promise<Barber | null> => {
+    if (!accessKey || accessKey.trim() === '') {
+      setLoggedInBarber(null);
+      return null;
+    }
+    try {
+      const { data, error } = await supabase
+        .from('barbers')
+        .select('*')
+        .eq('access_key', accessKey.trim())
+        .eq('is_active', true) // Only allow active barbers to log in
+        .single();
+
+      if (error) {
+        if (error.code === 'PGRST116') { // Not found
+          toast.error('Clave de acceso incorrecta o barbero no encontrado.');
+        } else {
+          toast.error('Error al verificar la clave de acceso.');
+        }
+        console.error('Error verifying barber access key:', error);
+        setLoggedInBarber(null);
+        return null;
+      }
+
+      if (data) {
+        setLoggedInBarber(data as Barber);
+        toast.success(`Bienvenido, ${data.name}!`);
+        return data as Barber;
+      }
+      setLoggedInBarber(null); // Should be caught by PGRST116, but as a fallback
+      return null;
+    } catch (err) {
+      toast.error('Ocurrió un error inesperado.');
+      console.error('Unexpected error in verifyBarberAccessKey:', err);
+      setLoggedInBarber(null);
+      return null;
+    }
+  }, []);
+
+  const logoutBarber = useCallback(() => {
+    setLoggedInBarber(null);
+    // Potentially clear any related stored data if needed, e.g., from localStorage
+    toast.success('Sesión cerrada.');
+  }, []);
+
+  const getAppointmentsForBarber = useCallback((barberId: string): Appointment[] => {
+    const today = new Date();
+    return appointments.filter(appointment =>
+      appointment.barber_id === barberId &&
+      !appointment.cancelled &&
+      (isSameDate(appointment.date, today) || isFutureDate(appointment.date)) // Only future or today's appointments
+    ).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime() || a.time.localeCompare(b.time)); // Sort by date then time
+  }, [appointments]);
+
   const value = {
     appointments,
     holidays,
@@ -805,6 +1132,7 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
     barberSchedules,
     adminSettings,
     reviews,
+    services, // Added services
     userPhone,
     setUserPhone: handleSetUserPhone,
     cancelAppointment,
@@ -831,6 +1159,11 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
     deleteReview,
     getApprovedReviews,
     getAverageRating,
+    // Barber Access Key Auth
+    loggedInBarber,
+    verifyBarberAccessKey,
+    logoutBarber,
+    getAppointmentsForBarber,
   };
 
   return (
