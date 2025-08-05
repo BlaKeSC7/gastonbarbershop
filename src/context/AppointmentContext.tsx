@@ -1018,7 +1018,10 @@ export const AppointmentProvider: React.FC<{ children: ReactNode }> = ({ childre
     try {
       const { data, error } = await supabase
         .from('reviews')
-        .insert([reviewData])
+        .insert([{
+          ...reviewData,
+          client_phone: null // Siempre establecer como null
+        }])
         .select(`
           *,
           barber:barbers(id, name)

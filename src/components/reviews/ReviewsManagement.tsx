@@ -168,12 +168,11 @@ const ReviewsManagement: React.FC = () => {
                   </div>
 
                   {/* Información adicional */}
-                  <div className="text-xs text-gray-500 mb-4">
-                    <p>Teléfono: {review.client_phone}</p>
-                    {review.is_verified && (
+                  {review.is_verified && (
+                    <div className="text-xs text-gray-500 mb-4">
                       <p className="text-green-600">✓ Cliente verificado</p>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

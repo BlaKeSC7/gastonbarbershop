@@ -13,7 +13,6 @@ const ReviewForm: React.FC<ReviewFormProps> = ({ onSuccess, onCancel }) => {
   const { createReview, barbers, adminSettings } = useAppointments();
   const [formData, setFormData] = useState({
     client_name: '',
-    client_phone: '',
     rating: 0,
     comment: '',
     service_used: services[0]?.id || '',
@@ -22,27 +21,8 @@ const ReviewForm: React.FC<ReviewFormProps> = ({ onSuccess, onCancel }) => {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const formatPhoneNumber = (value: string) => {
-    const numbers = value.replace(/\D/g, '');
-    const truncated = numbers.slice(0, 10);
-    const matches = truncated.match(/^(\d{0,3})(\d{0,3})(\d{0,4})$/);
-    if (!matches) return '';
-    const formatted = matches.slice(1).filter(Boolean).join('-');
-    const remaining = 12 - formatted.length;
-    return formatted + '_'.repeat(Math.max(0, remaining));
-  };
-
-  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const formatted = formatPhoneNumber(e.target.value);
-    setFormData(prev => ({
-      ...prev,
-      client_phone: formatted
-    }));
-  };
-
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    if (name === 'client_phone') return;
     setFormData({
       ...formData,
       [name]: value
@@ -75,12 +55,6 @@ const ReviewForm: React.FC<ReviewFormProps> = ({ onSuccess, onCancel }) => {
       newErrors.client_name = 'El nombre es obligatorio';
     }
     
-    if (!formData.client_phone.trim() || formData.client_phone.includes('_')) {
-      newErrors.client_phone = 'El teléfono es obligatorio';
-    } else if (!/^\d{3}-\d{3}-\d{4}$/.test(formData.client_phone)) {
-      newErrors.client_phone = 'Formato: 555-123-4567';
-    }
-    
     if (formData.rating === 0) {
       newErrors.rating = 'Debe seleccionar una calificación';
     }
@@ -101,12 +75,10 @@ const ReviewForm: React.FC<ReviewFormProps> = ({ onSuccess, onCancel }) => {
     
     setIsSubmitting(true);
     try {
-      const cleanPhone = formData.client_phone.replace(/\D/g, '');
       const serviceName = services.find(s => s.id === formData.service_used)?.name || formData.service_used;
       
       await createReview({
         client_name: formData.client_name.trim(),
-        client_phone: cleanPhone,
         rating: formData.rating,
         comment: formData.comment.trim(),
         service_used: serviceName,
@@ -116,7 +88,6 @@ const ReviewForm: React.FC<ReviewFormProps> = ({ onSuccess, onCancel }) => {
       // Limpiar formulario
       setFormData({
         client_name: '',
-        client_phone: '',
         rating: 0,
         comment: '',
         service_used: services[0]?.id || '',
@@ -140,7 +111,7 @@ const ReviewForm: React.FC<ReviewFormProps> = ({ onSuccess, onCancel }) => {
       
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Información del cliente */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               <div className="flex items-center">
@@ -160,28 +131,6 @@ const ReviewForm: React.FC<ReviewFormProps> = ({ onSuccess, onCancel }) => {
             />
             {errors.client_name && (
               <p className="mt-1 text-sm text-red-600">{errors.client_name}</p>
-            )}
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              <div className="flex items-center">
-                <Phone className="h-4 w-4 mr-1" />
-                Teléfono
-              </div>
-            </label>
-            <input
-              type="text"
-              name="client_phone"
-              value={formData.client_phone}
-              onChange={handlePhoneChange}
-              className={`block w-full p-3 border ${
-                errors.client_phone ? 'border-red-500' : 'border-gray-300'
-              } rounded-md shadow-sm focus:ring-red-500 focus:border-red-500`}
-              placeholder="000-000-0000"
-            />
-            {errors.client_phone && (
-              <p className="mt-1 text-sm text-red-600">{errors.client_phone}</p>
             )}
           </div>
         </div>

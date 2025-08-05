@@ -92,7 +92,7 @@ export interface AdminSettings {
 export interface Review {
   id: string;
   client_name: string;
-  client_phone: string;
+  client_phone?: string;
   rating: number;
   comment: string;
   service_used: string;
@@ -109,7 +109,7 @@ export interface Review {
 
 export interface CreateReviewData {
   client_name: string;
-  client_phone: string;
+  client_phone?: string;
   rating: number;
   comment: string;
   service_used: string;
